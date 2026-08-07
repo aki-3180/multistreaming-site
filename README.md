@@ -1,5 +1,7 @@
 # MultiView — Twitch / YouTube / Kick
 
+**公開URL: https://multistreaming-site.vercel.app**
+
 複数の配信を1画面で同時視聴できるWebサイトです（[multistre.am](https://multistre.am/) 風）。
 各サービス公式の埋め込みプレーヤー・埋め込みチャットを使っているため、**APIキー等の設定は一切不要**。チャット欄から各サービスにログインすれば、そのままコメントも投稿できます。
 
@@ -59,11 +61,22 @@ SafariやCookieブロック設定のあるブラウザでは、サイト設定�
 
 ## デプロイ
 
+- **GitHub**: https://github.com/aki-3180/multistreaming-site
+- **Vercel**: https://vercel.com/aki-s-projects3180/multistreaming-site （`main` に push すると自動で本番デプロイ）
+
 ビルド不要の静的サイトなので、`index.html` / `styles.css` / `app.js` の3ファイルを
 GitHub Pages・Cloudflare Pages・Netlify 等に置くだけで公開できます。
 
 - **HTTPS必須**（Twitch埋め込みの要件。localhost のみ HTTP 可）
 - 埋め込みの `parent` パラメータはページのホスト名から自動設定されるため、ドメインごとの設定変更は不要
+
+更新を公開するには、変更をコミットして `main` に push するだけです（Vercelが自動デプロイします）：
+
+```bash
+git add -A
+git commit -m "変更内容"
+git push
+```
 
 ## 構成
 
