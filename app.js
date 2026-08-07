@@ -54,10 +54,13 @@ const toastsEl = $('#toasts');
 const helpDlg = $('#help-dlg');
 const presetsPop = $('#presets-pop');
 const presetList = $('#preset-list');
+const qualityPop = $('#quality-pop');
+const qualityList = $('#quality-list');
 const btn = {
   layoutGrid: $('#layout-grid-btn'),
   layoutFocus: $('#layout-focus-btn'),
   mute: $('#mute-btn'),
+  quality: $('#quality-btn'),
   presets: $('#presets-btn'),
   share: $('#share-btn'),
   chat: $('#chat-btn'),
@@ -79,7 +82,18 @@ const state = {
   chatOpen: true,
   activeChat: null,
   chatWidth: 340,
+  quality: 'auto',
 };
+
+// 画質。過剰な解像度はデコード負荷＝発熱の主因なので、既定はタイルの実寸に合わせる
+const QUALITY_OPTIONS = [
+  { id: 'auto', label: '自動', desc: 'タイルの大きさに合わせて最適化（推奨）' },
+  { id: 'source', label: '最高画質', desc: '配信元のまま。負荷は最大' },
+  { id: '720', label: '高画質 720p', desc: '' },
+  { id: '480', label: '標準 480p', desc: '' },
+  { id: '360', label: '軽量 360p', desc: '発熱と電池消費を抑える' },
+  { id: '160', label: '最軽量 160p', desc: '多数の配信でも軽い' },
+];
 
 const players = new Map();       // key -> Twitch.Player (twitchのみ)
 const playerFrames = new Map();  // key -> iframe (yt / kick)
@@ -229,6 +243,7 @@ function saveSession() {
     chatOpen: state.chatOpen,
     activeChat: state.activeChat,
     chatWidth: state.chatWidth,
+    quality: state.quality,
   });
 }
 
@@ -309,7 +324,11 @@ function createPlayer(key) {
         try { player.setMuted(state.audibleName !== key); } catch { /* ignore */ }
       });
       player.addEventListener(P.ONLINE, () => setStatus(key, 'live'));
-      player.addEventListener(P.PLAYING, () => setStatus(key, 'live'));
+      player.addEventListener(P.PLAYING, () => {
+        setStatus(key, 'live');
+        // 画質一覧は再生開始後でないと取得できない
+        applyQuality(key);
+      });
       player.addEventListener(P.OFFLINE, () => setStatus(key, 'offline'));
     }, () => {
       const el = tileEls.get(key);
@@ -327,6 +346,7 @@ function createPlayer(key) {
   f.setAttribute('allow', 'autoplay; fullscreen; encrypted-media; picture-in-picture');
   f.setAttribute('allowfullscreen', '');
   if (platform === 'kick') f.dataset.muted = String(muted);
+  if (platform === 'yt') f.addEventListener('load', () => applyQuality(key));
   host.appendChild(f);
   playerFrames.set(key, f);
 }
@@ -535,6 +555,104 @@ function updateAudibleUI() {
   btn.mute.classList.toggle('audible', !!state.audibleName);
 }
 
+// ---------------------------------------------------------------- quality
+// 表示サイズより高い解像度で再生してもCPU/GPUを浪費するだけなので、
+// 必要な高さ（CSSピクセル）を求めて、それを満たす最小の画質を選ぶ。
+function targetHeightFor(key) {
+  if (state.quality === 'source') return Infinity;
+  if (state.quality !== 'auto') return Number(state.quality);
+  const el = tileEls.get(key);
+  if (!el) return 360;
+  return Math.max(160, Math.round(el.clientHeight - HEAD_H));
+}
+
+function applyQuality(key) {
+  const { platform } = parseEntry(key);
+  const target = targetHeightFor(key);
+
+  if (platform === 'tw') {
+    const p = players.get(key);
+    if (!p) return;
+    let list;
+    try { list = p.getQualities(); } catch { return; }
+    if (!list || !list.length) return;
+    const usable = list
+      .filter((q) => q.group && q.group !== 'auto' && q.height)
+      .sort((a, b) => a.height - b.height);
+    if (!usable.length) return;
+    // 少し下回る程度なら見た目の差は小さいので、上の画質へ飛ばさず負荷を優先する
+    const floor = target * 0.85;
+    const pick = usable.find((q) => q.height >= floor) || usable[usable.length - 1];
+    try {
+      if (p.getQuality() !== pick.group) p.setQuality(pick.group);
+    } catch { /* ignore */ }
+  } else if (platform === 'yt') {
+    const f = playerFrames.get(key);
+    if (!f || !f.contentWindow) return;
+    const yq = target >= 1080 ? 'hd1080'
+      : target >= 720 ? 'hd720'
+      : target >= 480 ? 'large'
+      : target >= 360 ? 'medium' : 'small';
+    f.contentWindow.postMessage(JSON.stringify({
+      event: 'command', func: 'setPlaybackQuality', args: [yq],
+    }), '*');
+  }
+  // Kickのプレーヤーには画質APIが無いため対象外
+}
+
+let qualityTimer = null;
+
+function scheduleQuality() {
+  clearTimeout(qualityTimer);
+  qualityTimer = setTimeout(() => state.channels.forEach(applyQuality), 400);
+}
+
+function setQuality(id) {
+  state.quality = id;
+  renderQuality();
+  state.channels.forEach(applyQuality);
+  saveSession();
+  const opt = QUALITY_OPTIONS.find((o) => o.id === id);
+  if (opt) toast(`画質: ${opt.label}`, 'accent');
+}
+
+function renderQuality() {
+  qualityList.innerHTML = '';
+  for (const opt of QUALITY_OPTIONS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'q-item' + (state.quality === opt.id ? ' active' : '');
+    b.innerHTML = `<svg class="q-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    const text = document.createElement('div');
+    text.className = 'q-text';
+    const label = document.createElement('div');
+    label.className = 'q-label';
+    label.textContent = opt.label;
+    text.appendChild(label);
+    if (opt.desc) {
+      const desc = document.createElement('div');
+      desc.className = 'q-desc';
+      desc.textContent = opt.desc;
+      text.appendChild(desc);
+    }
+    b.appendChild(text);
+    b.addEventListener('click', () => {
+      setQuality(opt.id);
+      toggleQualityPop(false);
+    });
+    qualityList.appendChild(b);
+  }
+}
+
+function toggleQualityPop(force) {
+  const show = force !== undefined ? force : qualityPop.classList.contains('hidden');
+  qualityPop.classList.toggle('hidden', !show);
+  if (show) {
+    togglePresetsPop(false);
+    renderQuality();
+  }
+}
+
 // ---------------------------------------------------------------- chat
 function ensureChatFrame(key) {
   if (chatEls.has(key)) return;
@@ -589,10 +707,39 @@ function fitChatFrames() {
   });
 }
 
+// 隠れているチャットも裏で更新され続けてメモリとCPUを食う（モバイルの発熱要因）。
+// 一定時間表示されなかったものは破棄し、再表示時に読み込み直す。
+// タブを行き来する操作で毎回リロードしないよう、少し猶予を置く。
+const CHAT_RELEASE_MS = 20000;
+const chatReleaseTimers = new Map();
+
+function cancelChatRelease(key) {
+  clearTimeout(chatReleaseTimers.get(key));
+  chatReleaseTimers.delete(key);
+}
+
+function scheduleChatRelease(key) {
+  if (chatReleaseTimers.has(key)) return;
+  chatReleaseTimers.set(key, setTimeout(() => {
+    chatReleaseTimers.delete(key);
+    if (state.activeChat === key) return;
+    const f = chatEls.get(key);
+    if (f) f.remove();
+    chatEls.delete(key);
+  }, CHAT_RELEASE_MS));
+}
+
 function setActiveChat(key) {
   state.activeChat = key;
-  if (key) ensureChatFrame(key);
-  for (const [k, f] of chatEls) f.classList.toggle('active', k === key);
+  if (key) {
+    cancelChatRelease(key);
+    ensureChatFrame(key);
+  }
+  for (const [k, f] of chatEls) {
+    const on = k === key;
+    f.classList.toggle('active', on);
+    if (!on) scheduleChatRelease(k);
+  }
   chatEmpty.classList.toggle('hidden', !!key);
   renderChatTabs();
   saveSession();
@@ -793,6 +940,8 @@ function relayout(animate = false) {
 
   // パネル寸法を変えた直後に縮小率を取り直す（ResizeObserver待ちだと一瞬ずれる）
   fitChatFrames();
+  // 自動画質はタイル寸法に連動するので、レイアウトが変わったら選び直す
+  if (state.quality === 'auto') scheduleQuality();
 }
 
 // ---------------------------------------------------------------- mutations
@@ -815,6 +964,7 @@ function _remove(key) {
   const f = chatEls.get(key);
   if (f) f.remove();
   chatEls.delete(key);
+  cancelChatRelease(key);
 }
 
 function afterMutation(animate = true) {
@@ -992,7 +1142,10 @@ function renderPresets() {
 function togglePresetsPop(force) {
   const show = force !== undefined ? force : presetsPop.classList.contains('hidden');
   presetsPop.classList.toggle('hidden', !show);
-  if (show) renderPresets();
+  if (show) {
+    toggleQualityPop(false);
+    renderPresets();
+  }
 }
 
 // ---------------------------------------------------------------- misc actions
@@ -1123,6 +1276,7 @@ function wireToolbar() {
     if (e.target === helpDlg) helpDlg.close();
   });
 
+  btn.quality.addEventListener('click', () => toggleQualityPop());
   btn.presets.addEventListener('click', () => togglePresetsPop());
   btn.presetSave.addEventListener('click', () => {
     if (!state.channels.length) { toast('保存する配信がありません', 'error'); return; }
@@ -1152,6 +1306,10 @@ function wireToolbar() {
     if (!presetsPop.classList.contains('hidden') &&
         !e.target.closest('#presets-pop, #presets-btn')) {
       togglePresetsPop(false);
+    }
+    if (!qualityPop.classList.contains('hidden') &&
+        !e.target.closest('#quality-pop, #quality-btn')) {
+      toggleQualityPop(false);
     }
     if (document.body.classList.contains('tb-open') &&
         !e.target.closest('#toolbar, #tb-toggle')) {
@@ -1204,8 +1362,11 @@ function wireKeyboard() {
       setLayout(state.layout === 'grid' ? 'focus' : 'grid');
     } else if (k === '?') {
       helpDlg.showModal();
+    } else if (k === 'q' || k === 'Q') {
+      toggleQualityPop();
     } else if (k === 'Escape') {
       togglePresetsPop(false);
+      toggleQualityPop(false);
       hideSuggest();
     }
   });
@@ -1219,7 +1380,9 @@ function init() {
     if (typeof sess.chatOpen === 'boolean') state.chatOpen = sess.chatOpen;
     if (typeof sess.chatWidth === 'number') state.chatWidth = clamp(sess.chatWidth, 280, 520);
     if (typeof sess.focusName === 'string') state.focusName = normalizeKey(sess.focusName);
+    if (QUALITY_OPTIONS.some((o) => o.id === sess.quality)) state.quality = sess.quality;
   }
+  renderQuality();
   chatPanel.style.width = state.chatWidth + 'px';
   document.body.classList.toggle('chat-open', state.chatOpen);
   btn.chat.setAttribute('aria-pressed', String(state.chatOpen));

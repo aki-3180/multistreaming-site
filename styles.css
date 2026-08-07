@@ -235,6 +235,35 @@ input::placeholder { color: var(--text-dim); opacity: 0.75; }
 
 .pop-title { font-weight: 700; font-size: 13px; margin-bottom: 10px; }
 
+.pop-note {
+  margin: 0 0 10px;
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--text-dim);
+}
+
+.pop-note-sub { margin: 10px 0 0; }
+
+.q-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 9px;
+  border-radius: 8px;
+}
+
+.q-item:hover { background: var(--elev3); }
+.q-item.active { background: var(--accent-soft); }
+.q-item.active .q-label { color: var(--accent-hover); }
+
+.q-check { flex: 0 0 14px; width: 14px; height: 14px; color: var(--accent-hover); }
+.q-item:not(.active) .q-check { visibility: hidden; }
+.q-text { min-width: 0; }
+.q-label { font-size: 13px; font-weight: 600; }
+.q-desc { font-size: 11px; color: var(--text-dim); margin-top: 1px; }
+
 .preset-save-row { display: flex; gap: 6px; margin-bottom: 10px; }
 .preset-save-row input { flex: 1; min-width: 0; }
 
@@ -738,4 +767,8 @@ kbd {
 @media (pointer: coarse) {
   .tile-head { flex-basis: 36px; }
   .t-btn { width: 28px; height: 28px; }
+
+  /* スワイプできるのでスクロールバーは不要（その分タブを広く使う） */
+  #chat-tabs { scrollbar-width: none; }
+  #chat-tabs::-webkit-scrollbar { display: none; }
 }

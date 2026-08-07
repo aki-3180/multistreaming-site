@@ -51,6 +51,10 @@
         <svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4zM23 9l-6 6M17 9l6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
 
+      <button id="quality-btn" class="icon-btn" title="画質・軽量化 (Q)" aria-haspopup="true">
+        <svg viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 1 9-9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 12l5-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+
       <button id="presets-btn" class="icon-btn" title="プリセット" aria-haspopup="true">
         <svg viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
       </button>
@@ -70,6 +74,15 @@
       <button id="fs-btn" class="icon-btn" title="全画面 (F)">
         <svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
+    </div>
+
+    <div id="quality-pop" class="pop hidden">
+      <div class="pop-title">画質</div>
+      <p class="pop-note">
+        画質を下げると端末の発熱と電池消費を大きく減らせます。同時に見る配信が多いほど効果があります。
+      </p>
+      <div id="quality-list"></div>
+      <p class="pop-note pop-note-sub">Twitch・YouTubeに適用されます（Kickは画質指定に非対応）。</p>
     </div>
 
     <div id="presets-pop" class="pop hidden">
@@ -179,12 +192,23 @@
       <li>チャットは縦持ちで画面下部、横持ちで右側の1枠として表示されます</li>
     </ul>
 
+    <h3>端末が熱くなる・動作が重いとき</h3>
+    <p>
+      発熱の主な原因はメモリ不足ではなく<b>映像のデコード処理</b>です。スマホが同時に処理できる動画は2〜4本程度で、それを超えるとCPU処理に切り替わり一気に発熱します。表示サイズより高い解像度で再生するのも無駄な負荷になります。
+    </p>
+    <ul>
+      <li><b>画質を下げる</b>（ツールバーのメーターアイコン、または <kbd>Q</kbd>）。既定の「自動」はタイルの大きさに合わせて解像度を落としますが、「軽量 360p」「最軽量 160p」を選ぶとさらに軽くなります</li>
+      <li><b>同時に見る配信を減らす</b> — 効果が最も大きい方法です</li>
+      <li>チャットを閉じる（<kbd>C</kbd>）。表示していないチャットは自動で解放されます</li>
+    </ul>
+
     <h3>キーボードショートカット</h3>
     <table class="kbd-table">
       <tr><td><kbd>1</kbd>〜<kbd>9</kbd></td><td>各配信の音声ON/OFF（追加順）</td></tr>
       <tr><td><kbd>M</kbd></td><td>全体ミュート</td></tr>
       <tr><td><kbd>C</kbd></td><td>チャット表示切替</td></tr>
       <tr><td><kbd>G</kbd></td><td>グリッド ⇄ フォーカス切替</td></tr>
+      <tr><td><kbd>Q</kbd></td><td>画質・軽量化の設定</td></tr>
       <tr><td><kbd>F</kbd></td><td>全画面</td></tr>
       <tr><td><kbd>?</kbd></td><td>このヘルプ</td></tr>
     </table>
