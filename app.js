@@ -19,8 +19,10 @@ const isCoarse = () => window.matchMedia && matchMedia('(pointer: coarse)').matc
 
 function measureHeadH() {
   const el = tileEls.values().next().value;
-  const h = el ? el.querySelector('.tile-head').offsetHeight : 0;
-  HEAD_H = h || (isCoarse() ? 36 : 30);
+  if (!el) { HEAD_H = isCoarse() ? 36 : 30; return; }
+  const head = el.querySelector('.tile-head');
+  // 映像に重ねて表示しているときはレイアウト上の高さを占有しない
+  HEAD_H = getComputedStyle(head).position === 'absolute' ? 0 : head.offsetHeight;
 }
 // ビューポート寸法は innerWidth ではなく documentElement 基準（CSSビューポートと常に一致）
 const vpW = () => document.documentElement.clientWidth;
@@ -921,8 +923,9 @@ function relayout(animate = false) {
   // 低い画面（横持ちスマホ等）はツールバーを格納して表示領域を最大化
   const compact = vpH() < 500;
   GAP = compact ? 5 : 6;
-  measureHeadH();
   document.body.classList.toggle('compact', compact);
+  // ヘッダーの扱いは compact 状態で変わるので、クラス適用後に測る
+  measureHeadH();
   if (!compact) document.body.classList.remove('tb-open');
   updateRotateHint();
 

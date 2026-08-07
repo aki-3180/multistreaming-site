@@ -590,6 +590,28 @@ body.resizing { user-select: none; }
 
 .tile-body { flex: 1 1 auto; position: relative; min-height: 0; }
 
+/* 低い画面（横持ちスマホ等）ではヘッダーを映像の上に重ねる。
+   ヘッダーが高さを消費しなくなるぶんタイルを16:9のまま大きくできる
+   （この状況では高さが制約になっているため効果が大きい） */
+body.compact .tile-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 6;
+  flex: none;
+  height: 26px;
+  padding: 0 3px;
+  background: linear-gradient(180deg,
+    rgba(8, 8, 12, 0.8) 0%, rgba(8, 8, 12, 0.45) 62%, rgba(8, 8, 12, 0) 100%);
+}
+
+body.compact .tile-name,
+body.compact .badge { text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9); }
+body.compact .t-btn { width: 26px; height: 26px; }
+body.compact .t-btn svg { width: 13.5px; height: 13.5px; }
+body.compact .grip { display: none; }
+
 .player-host, .player-host iframe { position: absolute; inset: 0; width: 100%; height: 100%; }
 
 .cover {
