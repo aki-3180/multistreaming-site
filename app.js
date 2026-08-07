@@ -567,7 +567,7 @@ function ensureChatFrame(key) {
 // コメントがほとんど残らない。基準幅でレンダリングしてパネルサイズまで縮小表示すると、
 // 固定UIごと小さくなり同じ面積に多くのコメントが入る（iOSでの横見切れも防げる）。
 const CHAT_BASE_W = 330;
-const CHAT_MIN_SCALE = 0.6;
+const CHAT_MIN_SCALE = 0.7;
 
 function fitChatFrames() {
   const w = chatFramesEl.clientWidth;

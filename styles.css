@@ -401,12 +401,9 @@ body.resizing { user-select: none; }
   gap: 4px;
   overflow-x: auto;
   min-width: 0;
-  /* タブ列のスクロールバーは場所を取るだけなので隠す（切れたタブが手がかりになる） */
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--elev3) transparent;
 }
-
-#chat-tabs::-webkit-scrollbar { display: none; }
 
 .chat-tab {
   flex: 0 0 auto;
