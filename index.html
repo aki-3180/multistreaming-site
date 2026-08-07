@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0b0f">
+  <meta name="description" content="Twitch・YouTube・Kickの配信を同時に視聴できるマルチストリームビューア。チャットにログインしてコメントも可能。">
+  <title>MultiView — 複数配信を同時視聴 (Twitch / YouTube / Kick)</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%239146ff'/%3E%3Cpath d='M5 5h6v6H5zM13 5h6v6h-6zM5 13h6v6H5z' fill='white'/%3E%3Cpath d='M14.5 13.5l5 2.5-5 2.5z' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="https://player.twitch.tv/js/embed/v1.js"></script>
+</head>
+<body class="chat-open">
+
+  <header id="toolbar">
+    <div class="tb-left">
+      <div class="logo" title="MultiView for Twitch">
+        <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+          <rect width="24" height="24" rx="5" fill="#9146ff"/>
+          <path d="M5 5h6v6H5zM13 5h6v6h-6zM5 13h6v6H5z" fill="#fff"/>
+          <path d="M14.5 13.5l5 2.5-5 2.5z" fill="#fff"/>
+        </svg>
+        <div class="logo-text">
+          <span class="logo-name">MultiView</span>
+          <span class="logo-sub">Twitch / YouTube / Kick</span>
+        </div>
+      </div>
+    </div>
+
+    <form id="add-form" autocomplete="off">
+      <div class="add-wrap">
+        <svg class="add-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <input id="add-input" type="text" placeholder="チャンネル名 / URL（Twitch・YouTube・Kick）"
+               spellcheck="false" autocapitalize="off" aria-label="追加するチャンネル名">
+        <div id="suggest" class="hidden" role="listbox"></div>
+      </div>
+      <button id="add-btn" type="submit" class="btn-primary">追加</button>
+    </form>
+
+    <div class="tb-right">
+      <div class="seg" role="group" aria-label="レイアウト">
+        <button id="layout-grid-btn" class="icon-btn seg-btn" title="グリッド表示 (G)" aria-pressed="true">
+          <svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+        </button>
+        <button id="layout-focus-btn" class="icon-btn seg-btn" title="フォーカス表示 (G)" aria-pressed="false">
+          <svg viewBox="0 0 24 24"><path d="M3 4h12v16H3zM18 4h3v7h-3zM18 13h3v7h-3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+
+      <button id="mute-btn" class="icon-btn" title="全体ミュート (M)">
+        <svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4zM23 9l-6 6M17 9l6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+
+      <button id="presets-btn" class="icon-btn" title="プリセット" aria-haspopup="true">
+        <svg viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+      </button>
+
+      <button id="share-btn" class="icon-btn" title="この構成のURLをコピー">
+        <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+
+      <button id="chat-btn" class="icon-btn" title="チャット表示切替 (C)" aria-pressed="true">
+        <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+      </button>
+
+      <button id="help-btn" class="icon-btn" title="ヘルプ / ショートカット (?)">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9.2 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4M12 17.5h.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+
+      <button id="fs-btn" class="icon-btn" title="全画面 (F)">
+        <svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+
+    <div id="presets-pop" class="pop hidden">
+      <div class="pop-title">プリセット</div>
+      <div class="preset-save-row">
+        <input id="preset-name" type="text" placeholder="現在の構成に名前を付ける" spellcheck="false">
+        <button id="preset-save" class="btn-primary btn-sm">保存</button>
+      </div>
+      <div id="preset-list"></div>
+    </div>
+  </header>
+
+  <button id="tb-toggle" title="メニューを開閉" aria-label="メニューを開閉">
+    <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </button>
+
+  <div id="rotate-hint" class="hidden" role="button" title="タップで全画面（横画面）">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="12" width="18" height="9" rx="2"/>
+      <path d="M16 2l3 3-3 3M19 5h-8a4 4 0 0 0-4 4"/>
+    </svg>
+    <span>横画面表示がおすすめです</span>
+    <button id="rotate-hint-close" aria-label="閉じる">
+      <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+
+  <main id="content">
+    <div id="stage">
+      <div id="empty-state">
+        <svg class="empty-logo" viewBox="0 0 24 24" width="64" height="64" aria-hidden="true">
+          <rect width="24" height="24" rx="5" fill="#9146ff"/>
+          <path d="M5 5h6v6H5zM13 5h6v6h-6zM5 13h6v6H5z" fill="#fff"/>
+          <path d="M14.5 13.5l5 2.5-5 2.5z" fill="#fff"/>
+        </svg>
+        <h1>複数の配信を、ひとつの画面で。</h1>
+        <ol class="empty-steps">
+          <li><b>Twitch</b>: チャンネル名（例: <code>shroud</code>）か URL を入力して追加</li>
+          <li><b>YouTube</b>: 動画/ライブのURL（<code>youtube.com/watch?v=…</code>）、<b>Kick</b>: <code>kick.com/…</code> のURLを貼り付け</li>
+          <li>複数追加で自動レイアウト。タイルのヘッダーをドラッグで並べ替え、チャットにログインすればコメントも投稿できます</li>
+        </ol>
+        <div id="recent-block" class="hidden">
+          <div class="recent-label">最近見たチャンネル</div>
+          <div id="recent-chips"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="resizer" title="ドラッグでチャット幅を変更"></div>
+
+    <aside id="chat-panel">
+      <div id="chat-head">
+        <div id="chat-tabs" role="tablist"></div>
+        <button id="chat-popout" class="icon-btn icon-btn-sm" title="チャットを別窓で開く">
+          <svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button id="chat-close" class="icon-btn icon-btn-sm" title="チャットを閉じる (C)">
+          <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div id="chat-frames">
+        <div id="chat-empty">配信を追加するとここにチャットが表示されます</div>
+      </div>
+    </aside>
+  </main>
+
+  <div id="toasts" aria-live="polite"></div>
+
+  <dialog id="help-dlg">
+    <div class="dlg-head">
+      <h2>ヘルプ</h2>
+      <button id="help-close" class="icon-btn icon-btn-sm" title="閉じる">
+        <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+
+    <h3>対応プラットフォーム</h3>
+    <ul>
+      <li><b>Twitch</b> — チャンネル名 or URL。LIVE/オフラインの自動判定、チャット表示・コメント投稿に対応</li>
+      <li><b>YouTube</b> — 動画・ライブのURL（<code>watch?v=…</code> / <code>youtu.be/…</code> / <code>live/…</code>）。チャンネルURL（<code>/channel/UC…</code>）を追加すると、そのチャンネルの現在のライブを自動再生（この形式ではチャット埋め込み不可）</li>
+      <li><b>Kick</b> — <code>kick.com/チャンネル名</code> のURL、または <code>kick:チャンネル名</code>。音声切替はプレーヤー再読込方式のため、プレーヤー内の音量ボタン操作が確実です</li>
+    </ul>
+
+    <h3>チャットへのログイン・コメント</h3>
+    <p>
+      チャット欄のログインボタンから各サービスにログインすると、このサイト上からそのままコメントを投稿できます（各サービス公式の埋め込みチャットを使用しています）。
+    </p>
+    <p class="note">
+      ログインできない場合は、ブラウザの設定で該当サービス（twitch.tv / youtube.com / kick.com）の<b>サードパーティCookieを許可</b>してください（Safariや一部ブラウザの標準設定ではブロックされることがあります）。
+    </p>
+
+    <h3>音声について</h3>
+    <p>
+      追加直後は全配信ミュートです。各配信のスピーカーボタン（または数字キー 1〜9）で「その配信だけ音声ON」に切り替わります。
+    </p>
+
+    <h3>スマホでの視聴（横画面推奨）</h3>
+    <ul>
+      <li><b>横画面での視聴がおすすめです。</b>縦持ち時に表示されるヒント、または全画面ボタンをタップすると全画面＋横画面に固定されます（対応ブラウザのみ。iPhoneは手動で回転してください）</li>
+      <li>横持ちなど低い画面ではツールバーが自動で隠れ、映像とチャットに全画面を使います。上部中央のハンドル（▾）でツールバーを開閉できます</li>
+      <li>チャットは縦持ちで画面下部、横持ちで右側の1枠として表示されます</li>
+    </ul>
+
+    <h3>キーボードショートカット</h3>
+    <table class="kbd-table">
+      <tr><td><kbd>1</kbd>〜<kbd>9</kbd></td><td>各配信の音声ON/OFF（追加順）</td></tr>
+      <tr><td><kbd>M</kbd></td><td>全体ミュート</td></tr>
+      <tr><td><kbd>C</kbd></td><td>チャット表示切替</td></tr>
+      <tr><td><kbd>G</kbd></td><td>グリッド ⇄ フォーカス切替</td></tr>
+      <tr><td><kbd>F</kbd></td><td>全画面</td></tr>
+      <tr><td><kbd>?</kbd></td><td>このヘルプ</td></tr>
+    </table>
+
+    <h3>その他</h3>
+    <ul>
+      <li>タイルのヘッダー（チャンネル名のバー）をドラッグすると配置を入れ替えられます。スマホでもタッチで操作できます</li>
+      <li>すべての配信は常に1画面に収まるよう自動レイアウトされます（スクロールなし）</li>
+      <li>画面幅が狭いとき（スマホ等）は、チャットも画面内の1つの枠として表示されます</li>
+      <li>「URLをコピー」で現在の構成を共有できます（例: <code>#shroud/pokimane</code>）</li>
+      <li>構成はプリセットとして保存でき、次回アクセス時は前回の構成を自動復元します</li>
+    </ul>
+    <p class="note">本サイトは非公式のファンメイドツールです。映像・チャットはTwitch公式の埋め込み機能を利用しています。</p>
+  </dialog>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
