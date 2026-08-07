@@ -15,6 +15,10 @@
   --radius: 10px;
   --toolbar-h: 54px;
   --shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+
+  /* ブラウザ製UI（スクロールバー等）もダークで描画させる */
+  color-scheme: dark;
+  scrollbar-color: var(--elev3) transparent;
 }
 
 * { box-sizing: border-box; }
@@ -59,6 +63,8 @@ input::placeholder { color: var(--text-dim); opacity: 0.75; }
 
 .hidden { display: none !important; }
 
+/* ※ scrollbar-width を指定した要素では Chrome 121+ が ::-webkit-scrollbar を
+   無視するため、色は上の scrollbar-color 側で必ず指定しておくこと */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--elev3); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: #34343f; }
@@ -394,9 +400,13 @@ body.resizing { user-select: none; }
   display: flex;
   gap: 4px;
   overflow-x: auto;
-  scrollbar-width: thin;
   min-width: 0;
+  /* タブ列のスクロールバーは場所を取るだけなので隠す（切れたタブが手がかりになる） */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
+
+#chat-tabs::-webkit-scrollbar { display: none; }
 
 .chat-tab {
   flex: 0 0 auto;
@@ -417,7 +427,7 @@ body.resizing { user-select: none; }
 .chat-tab:hover { background: var(--elev3); color: var(--text); }
 .chat-tab.active { background: var(--accent-soft); color: var(--accent-hover); }
 
-#chat-frames { flex: 1 1 auto; position: relative; min-height: 0; }
+#chat-frames { flex: 1 1 auto; position: relative; min-height: 0; overflow: hidden; }
 
 #chat-frames .chat-frame {
   position: absolute;

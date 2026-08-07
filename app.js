@@ -560,27 +560,29 @@ function ensureChatFrame(key) {
   el.dataset.name = key;
   chatFramesEl.appendChild(el);
   chatEls.set(key, el);
-  fitYtChats();
+  fitChatFrames();
 }
 
-// YouTubeチャットはパネルが狭いと内容が右で見切れる（特にiOSのiframe幅バグ）。
-// 一定幅(360px)でレンダリングし、パネル幅に合わせて縮小表示することで全体を収める。
-const YT_CHAT_RENDER_W = 360;
+// パネルが狭いと、チャット内の固定UI（上部バナー・下部の入力欄）が縦を占有して
+// コメントがほとんど残らない。基準幅でレンダリングしてパネルサイズまで縮小表示すると、
+// 固定UIごと小さくなり同じ面積に多くのコメントが入る（iOSでの横見切れも防げる）。
+const CHAT_BASE_W = 330;
+const CHAT_MIN_SCALE = 0.6;
 
-function fitYtChats() {
+function fitChatFrames() {
   const w = chatFramesEl.clientWidth;
   const h = chatFramesEl.clientHeight;
   if (!w || !h) return;
-  chatFramesEl.querySelectorAll('.yt-chat').forEach((f) => {
-    if (w >= YT_CHAT_RENDER_W) {
+  const scale = clamp(w / CHAT_BASE_W, CHAT_MIN_SCALE, 1);
+  chatFramesEl.querySelectorAll('iframe.chat-frame').forEach((f) => {
+    if (scale >= 1) {
       f.style.width = '';
       f.style.height = '';
       f.style.transform = '';
       f.style.transformOrigin = '';
       return;
     }
-    const scale = w / YT_CHAT_RENDER_W;
-    f.style.width = YT_CHAT_RENDER_W + 'px';
+    f.style.width = Math.round(w / scale) + 'px';
     f.style.height = Math.round(h / scale) + 'px';
     f.style.transform = `scale(${scale})`;
     f.style.transformOrigin = 'top left';
@@ -788,6 +790,9 @@ function relayout(animate = false) {
     el.style.width = Math.round(r.w) + 'px';
     el.style.height = Math.round(r.h) + 'px';
   }
+
+  // パネル寸法を変えた直後に縮小率を取り直す（ResizeObserver待ちだと一瞬ずれる）
+  fitChatFrames();
 }
 
 // ---------------------------------------------------------------- mutations
@@ -1165,6 +1170,7 @@ function wireResizer() {
     const onMove = (ev) => {
       state.chatWidth = clamp(startW + (startX - ev.clientX), 280, 520);
       chatPanel.style.width = state.chatWidth + 'px';
+      fitChatFrames();
     };
     const onUp = () => {
       resizer.removeEventListener('pointermove', onMove);
@@ -1244,7 +1250,7 @@ function init() {
   });
 
   new ResizeObserver(() => relayout(false)).observe(stage);
-  new ResizeObserver(() => fitYtChats()).observe(chatFramesEl);
+  new ResizeObserver(() => fitChatFrames()).observe(chatFramesEl);
   new ResizeObserver(() => relayout(false)).observe(document.documentElement);
   // ResizeObserverが拾えないケース（画面回転・表示モード切替等）の保険
   window.addEventListener('resize', () => relayout(false));
