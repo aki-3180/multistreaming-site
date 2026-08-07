@@ -11,9 +11,17 @@ const RESERVED = new Set([
   'directory', 'videos', 'settings', 'downloads', 'search', 'popout',
   'embed', 'subscriptions', 'wallet', 'drops', 'p', 'store', 'turbo',
 ]);
-let GAP = 8; // compactモードでは詰める（relayoutで更新）
-const HEAD_H = window.matchMedia && matchMedia('(pointer: coarse)').matches ? 36 : 30;
+let GAP = 6; // compactモードではさらに詰める（relayoutで更新）
+// ヘッダー高さはCSSのメディアクエリ側で決まるので、実測してレイアウト計算に使う。
+// 定数で持つとポインタ種別の判定タイミング次第で実際とずれ、タイルに死に領域ができる。
+let HEAD_H = 30;
 const isCoarse = () => window.matchMedia && matchMedia('(pointer: coarse)').matches;
+
+function measureHeadH() {
+  const el = tileEls.values().next().value;
+  const h = el ? el.querySelector('.tile-head').offsetHeight : 0;
+  HEAD_H = h || (isCoarse() ? 36 : 30);
+}
 // ビューポート寸法は innerWidth ではなく documentElement 基準（CSSビューポートと常に一致）
 const vpW = () => document.documentElement.clientWidth;
 const vpH = () => document.documentElement.clientHeight;
@@ -87,7 +95,7 @@ const state = {
 
 // 画質。過剰な解像度はデコード負荷＝発熱の主因なので、既定はタイルの実寸に合わせる
 const QUALITY_OPTIONS = [
-  { id: 'auto', label: '自動', desc: 'タイルの大きさに合わせて最適化（推奨）' },
+  { id: 'auto', label: '自動', desc: 'スマホのみタイルの大きさに合わせる（推奨）' },
   { id: 'source', label: '最高画質', desc: '配信元のまま。負荷は最大' },
   { id: '720', label: '高画質 720p', desc: '' },
   { id: '480', label: '標準 480p', desc: '' },
@@ -359,6 +367,7 @@ function reloadPlayer(key) {
   if (old) old.remove();
   players.delete(key);
   playerFrames.delete(key);
+  appliedQuality.delete(key);
   const host = document.createElement('div');
   host.className = 'player-host';
   host.id = domId(key);
@@ -566,8 +575,27 @@ function targetHeightFor(key) {
   return Math.max(160, Math.round(el.clientHeight - HEAD_H));
 }
 
+// setQuality はプレーヤーの再生を作り直すため、呼ぶたびにプリロール広告が
+// 再生され得る。同じ画質を選び直したときは触らないよう、適用済みを覚えておく。
+const appliedQuality = new Map();
+
 function applyQuality(key) {
   const { platform } = parseEntry(key);
+
+  // PCは自動制御しない。デコード余力が十分ある一方、画質切替による作り直しで
+  // 広告が繰り返し挿入され、視聴できなくなる副作用のほうが大きいため。
+  if (state.quality === 'auto' && !isCoarse()) {
+    if (platform === 'tw') {
+      const prev = appliedQuality.get(key);
+      const p = players.get(key);
+      // 以前に固定した画質が残っている場合だけ、配信側の自動選択に戻す
+      if (p && prev && prev !== 'auto') {
+        try { p.setQuality('auto'); appliedQuality.set(key, 'auto'); } catch { /* ignore */ }
+      }
+    }
+    return;
+  }
+
   const target = targetHeightFor(key);
 
   if (platform === 'tw') {
@@ -583,8 +611,10 @@ function applyQuality(key) {
     // 少し下回る程度なら見た目の差は小さいので、上の画質へ飛ばさず負荷を優先する
     const floor = target * 0.85;
     const pick = usable.find((q) => q.height >= floor) || usable[usable.length - 1];
+    if (appliedQuality.get(key) === pick.group) return;
     try {
-      if (p.getQuality() !== pick.group) p.setQuality(pick.group);
+      p.setQuality(pick.group);
+      appliedQuality.set(key, pick.group);
     } catch { /* ignore */ }
   } else if (platform === 'yt') {
     const f = playerFrames.get(key);
@@ -879,7 +909,8 @@ function relayout(animate = false) {
 
   // 低い画面（横持ちスマホ等）はツールバーを格納して表示領域を最大化
   const compact = vpH() < 500;
-  GAP = compact ? 6 : 8;
+  GAP = compact ? 5 : 6;
+  measureHeadH();
   document.body.classList.toggle('compact', compact);
   if (!compact) document.body.classList.remove('tb-open');
   updateRotateHint();
@@ -960,6 +991,7 @@ function _remove(key) {
   tileEls.delete(key);
   players.delete(key);
   playerFrames.delete(key);
+  appliedQuality.delete(key);
   tileStatus.delete(key);
   const f = chatEls.get(key);
   if (f) f.remove();
