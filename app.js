@@ -332,12 +332,11 @@ function createPlayer(key) {
         try { player.setMuted(state.audibleName !== key); } catch { /* ignore */ }
       });
       player.addEventListener(P.ONLINE, () => setStatus(key, 'live'));
-      player.addEventListener(P.PLAYING, () => {
-        setStatus(key, 'live');
-        // 画質一覧は再生開始後でないと取得できない
-        applyQuality(key);
-      });
+      // PLAYINGは広告の再生開始でも発火する。ここで画質を変えると広告が作り直されて
+      // 先に進まなくなるため、画質の適用はここでは行わない。
+      player.addEventListener(P.PLAYING, () => setStatus(key, 'live'));
       player.addEventListener(P.OFFLINE, () => setStatus(key, 'offline'));
+      scheduleInitialQuality(key);
     }, () => {
       const el = tileEls.get(key);
       if (!el) return;
@@ -630,11 +629,23 @@ function applyQuality(key) {
   // Kickのプレーヤーには画質APIが無いため対象外
 }
 
-let qualityTimer = null;
+// 画質の自動適用はプレーヤーごとに一度だけ、しかもプリロール広告が終わるころまで
+// 待ってから行う。広告の再生中にsetQualityを呼ぶと広告そのものが作り直され、
+// カウントダウンが進まないまま配信を視聴できなくなるため。
+const QUALITY_INIT_DELAY_MS = 30000;
+const qualityInitTimers = new Map();
 
-function scheduleQuality() {
-  clearTimeout(qualityTimer);
-  qualityTimer = setTimeout(() => state.channels.forEach(applyQuality), 400);
+function scheduleInitialQuality(key) {
+  cancelInitialQuality(key);
+  qualityInitTimers.set(key, setTimeout(() => {
+    qualityInitTimers.delete(key);
+    applyQuality(key);
+  }, QUALITY_INIT_DELAY_MS));
+}
+
+function cancelInitialQuality(key) {
+  clearTimeout(qualityInitTimers.get(key));
+  qualityInitTimers.delete(key);
 }
 
 function setQuality(id) {
@@ -971,8 +982,8 @@ function relayout(animate = false) {
 
   // パネル寸法を変えた直後に縮小率を取り直す（ResizeObserver待ちだと一瞬ずれる）
   fitChatFrames();
-  // 自動画質はタイル寸法に連動するので、レイアウトが変わったら選び直す
-  if (state.quality === 'auto') scheduleQuality();
+  // ※ ここで画質を選び直さないこと。setQualityは再生を作り直すため、
+  //    リサイズのたびに呼ぶと広告が延々と最初に戻る。
 }
 
 // ---------------------------------------------------------------- mutations
@@ -992,6 +1003,7 @@ function _remove(key) {
   players.delete(key);
   playerFrames.delete(key);
   appliedQuality.delete(key);
+  cancelInitialQuality(key);
   tileStatus.delete(key);
   const f = chatEls.get(key);
   if (f) f.remove();
