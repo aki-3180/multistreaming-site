@@ -426,6 +426,7 @@ body.resizing { user-select: none; }
   height: 100%;
   border: none;
   display: none;
+  background: var(--elev1);
 }
 
 #chat-frames .chat-frame.active { display: block; }
@@ -474,8 +475,7 @@ body.resizing { user-select: none; }
   .tile-head .badge, .tile-head .b-focus, .tile-head .grip { display: none; }
 }
 
-#content.anim .tile,
-#content.anim #chat-panel {
+#content.anim .tile {
   transition: left 0.28s cubic-bezier(0.25, 1, 0.4, 1), top 0.28s cubic-bezier(0.25, 1, 0.4, 1),
     width 0.28s cubic-bezier(0.25, 1, 0.4, 1), height 0.28s cubic-bezier(0.25, 1, 0.4, 1),
     transform 0.28s cubic-bezier(0.25, 1, 0.4, 1);

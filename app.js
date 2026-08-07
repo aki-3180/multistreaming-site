@@ -14,6 +14,9 @@ const RESERVED = new Set([
 let GAP = 8; // compactモードでは詰める（relayoutで更新）
 const HEAD_H = window.matchMedia && matchMedia('(pointer: coarse)').matches ? 36 : 30;
 const isCoarse = () => window.matchMedia && matchMedia('(pointer: coarse)').matches;
+// ビューポート寸法は innerWidth ではなく documentElement 基準（CSSビューポートと常に一致）
+const vpW = () => document.documentElement.clientWidth;
+const vpH = () => document.documentElement.clientHeight;
 
 const $ = (sel, el = document) => el.querySelector(sel);
 
@@ -543,7 +546,8 @@ function ensureChatFrame(key) {
     el.setAttribute('allow', 'clipboard-write');
   } else if (platform === 'yt' && !isYtChannel(id)) {
     el = document.createElement('iframe');
-    el.src = `https://www.youtube.com/live_chat?v=${id}&embed_domain=${location.hostname}`;
+    el.src = `https://www.youtube.com/live_chat?v=${id}&embed_domain=${location.hostname}&dark_theme=1`;
+    el.classList.add('yt-chat');
   } else if (platform === 'kick') {
     el = document.createElement('iframe');
     el.src = `https://kick.com/popout/${id}/chat`;
@@ -556,6 +560,31 @@ function ensureChatFrame(key) {
   el.dataset.name = key;
   chatFramesEl.appendChild(el);
   chatEls.set(key, el);
+  fitYtChats();
+}
+
+// YouTubeチャットはパネルが狭いと内容が右で見切れる（特にiOSのiframe幅バグ）。
+// 一定幅(360px)でレンダリングし、パネル幅に合わせて縮小表示することで全体を収める。
+const YT_CHAT_RENDER_W = 360;
+
+function fitYtChats() {
+  const w = chatFramesEl.clientWidth;
+  const h = chatFramesEl.clientHeight;
+  if (!w || !h) return;
+  chatFramesEl.querySelectorAll('.yt-chat').forEach((f) => {
+    if (w >= YT_CHAT_RENDER_W) {
+      f.style.width = '';
+      f.style.height = '';
+      f.style.transform = '';
+      f.style.transformOrigin = '';
+      return;
+    }
+    const scale = w / YT_CHAT_RENDER_W;
+    f.style.width = YT_CHAT_RENDER_W + 'px';
+    f.style.height = Math.round(h / scale) + 'px';
+    f.style.transform = `scale(${scale})`;
+    f.style.transformOrigin = 'top left';
+  });
 }
 
 function setActiveChat(key) {
@@ -599,7 +628,7 @@ let animTimer = null;
 
 // 狭い画面ではサイドパネルをやめ、チャットをレイアウト内の1枠として扱う
 function isChatTiled() {
-  return state.chatOpen && window.innerWidth < 940;
+  return state.chatOpen && vpW() < 940;
 }
 
 function bestGrid(n, W, H) {
@@ -700,7 +729,7 @@ function relayout(animate = false) {
   emptyState.classList.toggle('hidden', n > 0);
 
   // 低い画面（横持ちスマホ等）はツールバーを格納して表示領域を最大化
-  const compact = window.innerHeight < 500;
+  const compact = vpH() < 500;
   GAP = compact ? 6 : 8;
   document.body.classList.toggle('compact', compact);
   if (!compact) document.body.classList.remove('tb-open');
@@ -736,8 +765,10 @@ function relayout(animate = false) {
       rects.set(CHAT_CELL, { x: GAP, y: H - chatH - GAP, w: W - GAP * 2, h: chatH });
       region = { x: 0, y: 0, w: W, h: H - chatH - GAP };
     } else {
-      // 横画面: チャットは右側の1枠
-      const chatW = clamp(Math.round(W * 0.3), 240, 400);
+      // 横画面: チャットは右側の1枠（スマホ横持ちでは細くして映像側を広く使う）
+      const chatW = compact
+        ? clamp(Math.round(W * 0.22), 190, 300)
+        : clamp(Math.round(W * 0.3), 240, 400);
       rects.set(CHAT_CELL, { x: W - chatW - GAP, y: GAP, w: chatW, h: H - GAP * 2 });
       region = { x: 0, y: 0, w: W - chatW - GAP, h: H };
     }
@@ -1005,8 +1036,7 @@ let rotateHintDismissed = false;
 try { rotateHintDismissed = sessionStorage.getItem('mtv.rotateHint') === '1'; } catch { /* ignore */ }
 
 function updateRotateHint() {
-  const portraitPhone = isCoarse() && window.innerWidth < 720 &&
-    window.innerHeight > window.innerWidth;
+  const portraitPhone = isCoarse() && vpW() < 720 && vpH() > vpW();
   rotateHint.classList.toggle('hidden',
     !portraitPhone || rotateHintDismissed || state.channels.length === 0);
 }
@@ -1189,7 +1219,7 @@ function init() {
   btn.chat.setAttribute('aria-pressed', String(state.chatOpen));
   btn.layoutGrid.setAttribute('aria-pressed', String(state.layout === 'grid'));
   btn.layoutFocus.setAttribute('aria-pressed', String(state.layout === 'focus'));
-  if (window.innerWidth < 720) {
+  if (vpW() < 720) {
     addInput.placeholder = 'チャンネル名 / URL を追加';
   }
 
@@ -1214,6 +1244,10 @@ function init() {
   });
 
   new ResizeObserver(() => relayout(false)).observe(stage);
+  new ResizeObserver(() => fitYtChats()).observe(chatFramesEl);
+  new ResizeObserver(() => relayout(false)).observe(document.documentElement);
+  // ResizeObserverが拾えないケース（画面回転・表示モード切替等）の保険
+  window.addEventListener('resize', () => relayout(false));
 
   if (!window.Twitch) {
     whenTwitchReady(() => {}, () =>
