@@ -366,6 +366,7 @@ function createPlayer(key) {
         }, MUTE_SETTLE_MS);
       });
       player.addEventListener(P.ONLINE, () => setStatus(key, 'live'));
+      player.addEventListener(P.PAUSE, () => notePlayerPaused(key));
       // PLAYINGは広告の再生開始でも発火する。ここで画質を変えると広告が作り直されて
       // 先に進まなくなるため、画質の適用はここでは行わない。
       player.addEventListener(P.PLAYING, () => setStatus(key, 'live'));
@@ -405,9 +406,30 @@ function createPlayer(key) {
   playerFrames.set(key, f);
 }
 
+// スマホのブラウザは一時停止した動画のデコーダとバッファを手放すため、再開が
+// 「新しい視聴の開始」になり、Twitchでは毎回プリロール広告が入る。
+// PCはプレーヤーが再生位置を保持するので同じ操作でも広告にならない（実測）。
+// 気づかずに繰り返すと広告だらけになるので、一度だけ案内する。
+let pauseHintShown = false;
+let pauseHintMutedUntil = 0;
+
+const mutePauseHint = (ms = 6000) => {
+  pauseHintMutedUntil = Math.max(pauseHintMutedUntil, performance.now() + ms);
+};
+
+function notePlayerPaused(key) {
+  if (pauseHintShown || !isCoarse()) return;
+  // 自分で作り直したとき・バックグラウンド化で止まったときは案内しない
+  if (document.hidden || performance.now() < pauseHintMutedUntil) return;
+  if (!state.channels.includes(key)) return;
+  pauseHintShown = true;
+  toast('一時停止すると再開時に広告が入ります。音を止めるだけならスピーカーボタンを使ってください', 'accent', 6000);
+}
+
 function reloadPlayer(key) {
   const el = tileEls.get(key);
   if (!el) return;
+  mutePauseHint();
   const body = $('.tile-body', el);
   const old = $('.player-host', body);
   if (old) old.remove();
@@ -492,14 +514,15 @@ function createTile(key) {
   createPlayer(key);
 }
 
-// ---------------------------------------------------------------- タッチ操作
-// 映像そのものはリンクになっていて、軽く触れただけで配信サイトへ遷移してしまう。
-// タッチ端末では透明なシールドで覆い、タップはこちらのUIだけに届くようにする。
+// ---------------------------------------------------------------- 誤操作の防止
+// 映像そのものはリンクになっていて、軽く触れる/クリックするだけで配信サイトへ
+// 遷移してしまう。透明なシールドで覆い、操作はこちらのUIだけに届くようにする。
 // （プレーヤー内蔵のミュートボタンが効かなくなるので、こちら側のミュートと
 //   二重になって状態が食い違う問題も同時に解消される）
 const touchThrough = new Set();
 const touchThroughTimers = new Map();
-// 直接操作を許可したままだと誤タップ防止の意味が薄れるので、一定時間で自動的に戻す
+// タッチでは指が触れただけで発動するため、開けっぱなしにせず自動で閉じる。
+// マウスは意図しないと押さないので、明示的に戻すまで開けたままにする。
 const TOUCH_THROUGH_MS = 30000;
 let touchThroughHinted = false;
 
@@ -510,10 +533,15 @@ function setTouchThrough(key, on) {
   touchThroughTimers.delete(key);
   if (on) {
     touchThrough.add(key);
-    touchThroughTimers.set(key, setTimeout(() => setTouchThrough(key, false), TOUCH_THROUGH_MS));
+    const auto = isCoarse();
+    if (auto) {
+      touchThroughTimers.set(key, setTimeout(() => setTouchThrough(key, false), TOUCH_THROUGH_MS));
+    }
     if (!touchThroughHinted) {
       touchThroughHinted = true;
-      toast('プレーヤーを直接操作できます（30秒で自動的に戻ります）', 'accent', 3600);
+      toast(auto
+        ? 'プレーヤーを直接操作できます（30秒で自動的に戻ります）'
+        : 'プレーヤーを直接操作できます。同じボタンで誤クリック防止に戻せます', 'accent', 4200);
     }
   } else {
     touchThrough.delete(key);
@@ -906,7 +934,7 @@ function applyQuality(key) {
       const p = players.get(key);
       // 以前に固定した画質が残っている場合だけ、配信側の自動選択に戻す
       if (p && prev && prev !== 'auto') {
-        try { p.setQuality('auto'); appliedQuality.set(key, 'auto'); } catch { /* ignore */ }
+        try { mutePauseHint(); p.setQuality('auto'); appliedQuality.set(key, 'auto'); } catch { /* ignore */ }
       }
     }
     return;
@@ -929,6 +957,7 @@ function applyQuality(key) {
     const pick = usable.find((q) => q.height >= floor) || usable[usable.length - 1];
     if (appliedQuality.get(key) === pick.group) return;
     try {
+      mutePauseHint(); // setQuality は再生を作り直すので PAUSE が発火する
       p.setQuality(pick.group);
       appliedQuality.set(key, pick.group);
     } catch { /* ignore */ }
@@ -1780,6 +1809,7 @@ function wireLifecycle() {
       // モバイルではタブ破棄前にこれしか来ないことがあるので必ず保存する
       saveSession();
       notePausedOnHide();
+      mutePauseHint(15000); // 復帰直後にブラウザ都合の一時停止を拾わないように
       // 長時間離れたままなら維持をやめる（無音の再生を続ける意味がなく、
       // 通信量と電池だけを消費するため）
       clearTimeout(keepAliveReleaseTimer);

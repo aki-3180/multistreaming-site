@@ -524,13 +524,24 @@ body.resizing { user-select: none; }
   container-type: inline-size;
 }
 
-/* 狭いタイルでは補助ボタンを自動的に隠す（音声・拡大・閉じるを優先） */
+/* 狭いタイルでは補助ボタンを自動的に隠す。優先度は
+   音声 > 再読み込み > 直接操作 > 閉じる > 拡大 > バッジ。
+   再読み込み(⟳)は広告が止まったときの唯一の復帰手段なので最後まで残す
+   （拡大はヘッダーのダブルタップでも代用できるため先に落とす）。 */
 @container (max-width: 340px) {
-  .tile-head .b-chat, .tile-head .b-reload, .tile-head .b-pop { display: none; }
+  .tile-head .b-chat, .tile-head .b-pop { display: none; }
 }
 
-@container (max-width: 210px) {
-  .tile-head .badge, .tile-head .b-focus, .tile-head .grip { display: none; }
+@container (max-width: 290px) {
+  .tile-head .b-focus { display: none; }
+}
+
+@container (max-width: 240px) {
+  .tile-head .badge, .tile-head .grip { display: none; }
+}
+
+@container (max-width: 170px) {
+  .tile-head .b-reload { display: none; }
 }
 
 #content.anim .tile {
@@ -650,22 +661,18 @@ body.compact.touch .tile.touch-through .tile-head {
 
 .player-host, .player-host iframe { position: absolute; inset: 0; width: 100%; height: 100%; }
 
-/* 映像そのものがリンクになっていて、タッチ端末では軽く触れただけで配信サイトへ
-   遷移してしまう。透明なシールドで覆ってタップを受け止め、こちらのUIだけに
+/* 映像そのものがリンクになっていて、軽く触れる/クリックするだけで配信サイトへ
+   遷移してしまう。透明なシールドで覆って操作を受け止め、こちらのUIだけに
    届くようにする（プレーヤー内蔵のミュートボタンとの二重操作も同時に防げる）。
    「直接操作」ボタン (.b-touch) を押した枠だけ一時的にシールドを外す。 */
 .tap-shield {
   position: absolute;
   inset: 0;
   z-index: 4;
-  display: none;
   -webkit-tap-highlight-color: transparent;
 }
 
-body.touch .tile:not(.touch-through) .tap-shield { display: block; }
-
-.b-touch { display: none; }
-body.touch .b-touch { display: inline-flex; }
+.tile.touch-through .tap-shield { display: none; }
 
 /* 直接操作を許可中の枠は「触ると配信サイトへ飛ぶ状態」なので分かるようにする。
    内側(inset)だと映像のiframeに隠れてしまうため外側に出す。 */
