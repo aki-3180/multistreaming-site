@@ -818,6 +818,24 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.62); }
 #help-dlg ul { padding-left: 1.3em; margin: 6px 0; }
 #help-dlg .note { color: var(--text-dim); font-size: 12.5px; }
 
+/* ヘルプ内: 使用中のブラウザに合わせたCookie設定の案内 */
+.env-box {
+  background: var(--elev2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 12px 0;
+}
+
+.env-title { font-size: 13px; font-weight: 700; color: var(--accent-hover); }
+#help-dlg .env-state { font-size: 12.5px; color: var(--text-dim); margin: 4px 0 8px; }
+#help-dlg .env-steps { margin: 0; padding-left: 1.3em; }
+#help-dlg .env-steps li { font-size: 12.5px; line-height: 1.8; }
+#help-dlg .env-note { font-size: 12px; color: var(--text-dim); margin: 8px 0 0; }
+
+.q-arrow { visibility: visible !important; color: var(--text-dim); }
+
 .kbd-table { border-collapse: collapse; font-size: 13px; }
 .kbd-table td { padding: 4px 14px 4px 0; line-height: 1.7; }
 

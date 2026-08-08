@@ -1544,6 +1544,91 @@ function togglePresetsPop(force) {
   }
 }
 
+// ---------------------------------------------------------------- ログインとCookieの案内
+// 埋め込みプレーヤーは別サイト扱いなので、サードパーティCookieが通らないと
+// Twitchにログイン済みでも匿名視聴者になり、Turbo・サブスクの広告非表示が効かない。
+// 実際にCookieが通っているかはページ側から測れない（他オリジンのiframeの中は読めず、
+// requestStorageAccessFor は Related Website Sets 専用で twitch.tv には使えない）。
+// 測れない以上、ブラウザごとの既定の挙動と設定手順を正しく出すことに徹する。
+function browserKind() {
+  const ua = navigator.userAgent;
+  if (isIOS()) return /CriOS|FxiOS|EdgiOS/.test(ua) ? 'ios-other' : 'safari-ios';
+  if (/Firefox\//.test(ua)) return 'firefox';
+  if (/Edg\//.test(ua)) return 'chromium';
+  if (/Chrome\/|Chromium\//.test(ua)) return 'chromium';
+  if (/Safari\//.test(ua)) return 'safari';
+  return 'other';
+}
+
+const COOKIE_GUIDE = {
+  chromium: {
+    title: 'Chrome / Edge',
+    state: '既定ではサードパーティCookieは許可されています。ブロック設定にしている場合のみ、下記の変更が必要です。',
+    steps: [
+      'アドレスバー右端の目のアイコン →「サードパーティCookieを許可」',
+      'または 設定 → プライバシーとセキュリティ → サードパーティのCookie →「Cookieの使用を許可するサイト」に <code>[*.]twitch.tv</code> を追加',
+    ],
+  },
+  firefox: {
+    title: 'Firefox',
+    state: '強化型トラッキング防止により、サードパーティCookieはサイトごとに分離されます（既定で埋め込みにログインが通りません）。',
+    steps: ['アドレスバーの盾アイコン →「このサイトでは保護を無効にする」'],
+  },
+  'safari-ios': {
+    title: 'Safari（iPhone / iPad）',
+    state: 'サードパーティCookieは既定で強くブロックされます。設定を変えても埋め込みには通らないことが多く、iOSではこの方法は期待しないでください。',
+    steps: [
+      '設定アプリ → Safari →「サイト越えトラッキングを防ぐ」をオフ',
+      'それでも通らない場合は「配信サイトで開く」でTwitchアプリを使うのが確実です',
+    ],
+  },
+  safari: {
+    title: 'Safari（Mac）',
+    state: 'サードパーティCookieは既定でブロックされます。',
+    steps: ['Safari → 設定 → プライバシー →「サイト越えトラッキングを防ぐ」のチェックを外す'],
+  },
+  'ios-other': {
+    title: 'iOSのブラウザ',
+    state: 'iOSのブラウザは中身がすべてSafariと同じ仕組みなので、サードパーティCookieの制限も同じです。',
+    steps: ['設定アプリ → Safari →「サイト越えトラッキングを防ぐ」をオフ', '通らない場合は「配信サイトで開く」でTwitchアプリを使ってください'],
+  },
+  other: {
+    title: 'お使いのブラウザ',
+    state: 'サードパーティCookieの設定を確認してください。',
+    steps: ['ブラウザの設定で <code>twitch.tv</code> のCookieを許可（トラッキング防止の例外に追加）'],
+  },
+};
+
+function renderCookieEnv() {
+  const g = COOKIE_GUIDE[browserKind()] || COOKIE_GUIDE.other;
+  const box = $('#cookie-env');
+  const steps = g.steps.map((s) => `<li>${s}</li>`).join('');
+  const appNote = isStandalone()
+    ? '<p class="env-note">アプリとして起動中はアドレスバーが無いので、いったん同じブラウザでこのサイトを開いて設定してください（設定はアプリ側にも反映されます）。</p>'
+    : '';
+  box.innerHTML = `<div class="env-title">${g.title} の場合</div>
+    <p class="env-state">${g.state}</p>
+    <ol class="env-steps">${steps}</ol>${appNote}`;
+}
+
+function openLoginHelp() {
+  renderCookieEnv();
+  if (!helpDlg.open) helpDlg.showModal();
+  $('#login-help').scrollIntoView({ block: 'start' });
+}
+
+// Cookie設定を変えた直後に一度だけ使う想定。プレーヤーは作り直しになるので広告が入る。
+function reloadEverything() {
+  for (const key of state.channels) reloadPlayer(key);
+  for (const [key, f] of chatEls) {
+    f.remove();
+    chatEls.delete(key);
+    cancelChatRelease(key);
+  }
+  if (state.activeChat) setActiveChat(state.activeChat);
+  toast('プレーヤーとチャットを読み込み直しました', 'accent');
+}
+
 // ---------------------------------------------------------------- misc actions
 function shareUrl() {
   if (!state.channels.length) { toast('共有する配信がありません', 'error'); return; }
@@ -1784,8 +1869,16 @@ function wireToolbar() {
   document.addEventListener('fullscreenchange', () =>
     btn.fs.setAttribute('aria-pressed', String(!!document.fullscreenElement)));
 
-  btn.help.addEventListener('click', () => helpDlg.showModal());
+  btn.help.addEventListener('click', () => {
+    renderCookieEnv();
+    helpDlg.showModal();
+  });
   btn.helpClose.addEventListener('click', () => helpDlg.close());
+  $('#reload-all').addEventListener('click', reloadEverything);
+  $('#login-help-btn').addEventListener('click', () => {
+    toggleQualityPop(false);
+    openLoginHelp();
+  });
   helpDlg.addEventListener('click', (e) => {
     if (e.target === helpDlg) helpDlg.close();
   });
@@ -1884,6 +1977,7 @@ function wireKeyboard() {
     } else if (k === 'g' || k === 'G') {
       setLayout(state.layout === 'grid' ? 'focus' : 'grid');
     } else if (k === '?') {
+      renderCookieEnv();
       helpDlg.showModal();
     } else if (k === 'q' || k === 'Q') {
       toggleQualityPop();
@@ -1907,6 +2001,7 @@ function init() {
     if (typeof sess.keepAlive === 'boolean') state.keepAlive = sess.keepAlive;
   }
   renderQuality();
+  renderCookieEnv();
   chatPanel.style.width = state.chatWidth + 'px';
   document.body.classList.toggle('chat-open', state.chatOpen);
   btn.chat.setAttribute('aria-pressed', String(state.chatOpen));

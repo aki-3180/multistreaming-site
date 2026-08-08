@@ -113,6 +113,13 @@
       <p class="pop-note pop-note-sub" id="keepalive-na" hidden>
         この端末では利用できません（iOSは音量を変更できず、アプリを離れると再生が必ず停止するため）。
       </p>
+      <button id="login-help-btn" class="q-item" type="button">
+        <svg class="q-check q-arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div class="q-text">
+          <div class="q-label">Turbo・サブスクで広告を消すには</div>
+          <div class="q-desc">埋め込みにログインを認識させる設定（サードパーティCookie）</div>
+        </div>
+      </button>
     </div>
 
     <div id="presets-pop" class="pop hidden">
@@ -196,19 +203,34 @@
       <li><b>Kick</b> — <code>kick.com/チャンネル名</code> のURL、または <code>kick:チャンネル名</code>。音声切替はプレーヤー再読込方式のため、プレーヤー内の音量ボタン操作が確実です</li>
     </ul>
 
-    <h3>チャットへのログイン・コメント</h3>
+    <h3 id="login-help">ログインと広告（サードパーティCookie）</h3>
     <p>
-      チャット欄のログインボタンから各サービスにログインすると、このサイト上からそのままコメントを投稿できます（各サービス公式の埋め込みチャットを使用しています）。
+      <b>Twitch Turbo</b> か対象チャンネルの<b>サブスクリプション</b>に入っていれば、このサイトの埋め込みでも広告は出ません。
+      チャットへのコメント投稿も同じで、鍵になるのは「<b>埋め込みプレーヤーがあなたのログインを認識できるか</b>」の一点です。
     </p>
     <p class="note">
-      <b>「ログインしたのに反映されない・すぐログアウトされる」場合</b>、ブラウザのサードパーティCookie制限が原因です。以下で解決できます：
+      埋め込みはブラウザから見ると別サイト（<code>player.twitch.tv</code>）の扱いです。
+      <b>サードパーティCookie</b>が許可されていないと、Twitchにログイン済みでも埋め込みの中では匿名の視聴者として扱われ、
+      TurboもサブスクもBitsも効きません。「ログインしたのにすぐログアウトされる」のも同じ原因です。
     </p>
-    <ul class="note">
-      <li><b>Chrome / Edge</b>: アドレスバー右端のCookie（目）アイコン →「サードパーティCookieを許可」。または 設定 → プライバシーとセキュリティ → サードパーティCookie →「許可するサイト」にこのサイトのドメインを追加</li>
-      <li><b>Safari</b>: 設定 → Safari →「サイト越えトラッキングを防ぐ」をオフ</li>
-      <li><b>Firefox</b>: アドレスバーの盾アイコン → このサイトで強化型トラッキング防止機能をオフ</li>
-      <li><b>確実な方法</b>: チャット右上の「別窓で開く」ボタンでポップアウトすると、公式サイトと同じ扱いになるためログインが必ず保持されます</li>
-    </ul>
+
+    <div id="cookie-env" class="env-box"></div>
+
+    <p>
+      <b>効いているかの確認</b> — チャット欄を見てください。自分のユーザー名でコメントを打てる状態ならログインが通っています。
+      ログインボタンが出ていれば匿名のままで、Turbo・サブスクも効いていません。
+    </p>
+    <p>
+      設定を変えたあとは、プレーヤーとチャットを読み込み直す必要があります。
+    </p>
+    <p>
+      <button id="reload-all" class="btn-primary btn-sm" type="button">すべて再読み込み</button>
+      <span class="note">※ 再読み込みするとTwitchの広告が入り直します。設定を変えた直後の1回だけ実行してください。</span>
+    </p>
+    <p class="note">
+      <b>どうしても通らないとき</b> — 枠のヘッダーの「配信サイトで開く」ボタンを使うと、Twitch本体（スマホならアプリ）で開くので確実にログイン状態になります。
+      チャットだけなら右上の「別窓で開く」でも同じです。
+    </p>
 
     <h3>音声について</h3>
     <p>
