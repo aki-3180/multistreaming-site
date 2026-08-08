@@ -27,6 +27,8 @@
   }
   button.primary { background: #9146ff; border-color: #9146ff; }
   button:active { filter: brightness(1.3); }
+  button.mode { flex: 1 1 140px; font-size: 13px; }
+  button.mode.on { border-color: #9146ff; color: #a970ff; background: rgba(145,70,255,.16); }
   #player { width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 8px; overflow: hidden; }
   section { border: 1px solid #2b2b36; border-radius: 10px; padding: 10px 12px; margin: 10px 0; background: #141419; }
   h2 { font-size: 12px; margin: 0 0 6px; color: #a970ff; letter-spacing: .04em; }
@@ -51,6 +53,12 @@
   <button class="primary" id="load">読み込む</button>
 </div>
 
+<div class="row">
+  <button id="mode-sdk" class="mode on">A: SDK（アプリと同じ）</button>
+  <button id="mode-raw" class="mode">B: 素のiframe</button>
+</div>
+<p class="hint" id="mode-note"></p>
+
 <div id="player"></div>
 
 <div class="row">
@@ -69,6 +77,7 @@
     <li>下のログで <b>PAUSE → PLAY</b> のあと <b>PLAYING</b> がどう出るか、
       統計の <b>latency</b>（配信からの遅延）が大きく飛ぶかを見る。飛んでいれば再生が作り直されている</li>
     <li>同じ端末の同じブラウザで <b>twitch.tv を直接開いた場合</b>と比べる</li>
+    <li><b>A と B を切り替えて</b>同じことを試す。差が出れば埋め込み方に原因がある</li>
   </ol>
 </section>
 
@@ -102,13 +111,44 @@ function log(msg) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+// A = 公式SDK（アプリ本体と同じ経路。iframeにsandboxが付く）
+// B = 自前のiframe（sandboxなし・allowを広めに指定）
+// 唯一こちらで変えられる構造的な違いなので、広告の出方が変わるか比べる。
+let mode = 'sdk';
+
+function setMode(m) {
+  mode = m;
+  $('#mode-sdk').classList.toggle('on', m === 'sdk');
+  $('#mode-raw').classList.toggle('on', m === 'raw');
+  $('#mode-note').textContent = m === 'sdk'
+    ? 'アプリ本体と同じ作り方です。下のボタンで一時停止/再生を操作でき、ログと統計が出ます。'
+    : 'sandboxを付けずに埋め込みます。操作用のAPIが無いので、一時停止/再生はプレーヤー内の再生ボタンで行ってください（ログと統計は出ません）。';
+  const ch = $('#ch').value.trim().toLowerCase();
+  if (ch) load(ch);
+}
+
 function load(channel) {
   if (!/^[A-Za-z0-9_]{2,25}$/.test(channel)) { log('チャンネル名が不正です'); return; }
   location.hash = channel;
   $('#player').innerHTML = '';
+  player = null;
   lines = [];
   t0 = performance.now();
-  log('プレーヤーを生成: ' + channel);
+
+  if (mode === 'raw') {
+    log('素のiframeで生成: ' + channel);
+    const f = document.createElement('iframe');
+    f.src = 'https://player.twitch.tv/?channel=' + encodeURIComponent(channel)
+      + '&parent=' + encodeURIComponent(location.hostname) + '&autoplay=true&muted=true';
+    f.setAttribute('allow', 'autoplay; fullscreen; encrypted-media; picture-in-picture');
+    f.setAttribute('allowfullscreen', '');
+    f.style.cssText = 'width:100%;height:100%;border:0';
+    $('#player').appendChild(f);
+    $('#stats').textContent = '（素のiframeでは統計を取得できません）';
+    return;
+  }
+
+  log('SDKで生成: ' + channel);
   player = new Twitch.Player('player', {
     channel, parent: [location.hostname],
     width: '100%', height: '100%', autoplay: true, muted: true,
@@ -118,6 +158,10 @@ function load(channel) {
   for (const name of ['READY', 'PLAY', 'PLAYING', 'PAUSE', 'ENDED', 'ONLINE', 'OFFLINE']) {
     if (P[name]) player.addEventListener(P[name], () => log(name));
   }
+  setTimeout(() => {
+    const f = $('#player iframe');
+    if (f) log('iframe sandbox=' + (f.getAttribute('sandbox') || 'なし') + ' / allow=' + (f.getAttribute('allow') || 'なし'));
+  }, 1000);
 }
 
 setInterval(() => {
@@ -140,6 +184,8 @@ setInterval(() => {
 }, 1000);
 
 $('#load').addEventListener('click', () => load($('#ch').value.trim().toLowerCase()));
+$('#mode-sdk').addEventListener('click', () => setMode('sdk'));
+$('#mode-raw').addEventListener('click', () => setMode('raw'));
 $('#pause').addEventListener('click', () => { log('— 操作: pause()'); try { player.pause(); } catch (e) { log('err ' + e.message); } });
 $('#play').addEventListener('click', () => { log('— 操作: play()'); try { player.play(); } catch (e) { log('err ' + e.message); } });
 $('#mute').addEventListener('click', () => {
@@ -167,6 +213,7 @@ $('#clear').addEventListener('click', () => { lines = []; logEl.textContent = '(
     `top-level-storage-access  : ${tlsa}`;
 })();
 
+setMode('sdk');
 const fromHash = decodeURIComponent(location.hash.replace(/^#/, ''));
 if (fromHash) { $('#ch').value = fromHash; load(fromHash); }
 </script>
