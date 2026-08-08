@@ -317,6 +317,15 @@ body.compact.tb-open #toolbar {
   border: 1px solid var(--border);
   border-top: none;
   color: var(--text-dim);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 画面最上部の細い的はタッチだと押しづらいので、当たり判定だけ外へ広げる */
+#tb-toggle::after {
+  content: '';
+  position: absolute;
+  inset: -4px -16px -12px;
 }
 
 body.compact #tb-toggle { display: flex; }
@@ -324,6 +333,12 @@ body.compact.tb-open #tb-toggle { top: var(--toolbar-h); }
 #tb-toggle svg { width: 14px; height: 14px; transition: transform 0.2s; }
 body.tb-open #tb-toggle svg { transform: rotate(180deg); }
 #tb-toggle:hover { color: var(--text); background: var(--elev2); }
+
+/* タッチ端末では見た目のサイズも上げる（指の当たり判定に対して小さすぎるため） */
+@media (pointer: coarse) {
+  #tb-toggle { width: 92px; height: 28px; background: rgba(20, 20, 25, 0.92); }
+  #tb-toggle svg { width: 17px; height: 17px; }
+}
 
 /* ============ 横画面推奨ヒント（縦持ちスマホ） ============ */
 #rotate-hint {
@@ -612,7 +627,45 @@ body.compact .t-btn { width: 26px; height: 26px; }
 body.compact .t-btn svg { width: 13.5px; height: 13.5px; }
 body.compact .grip { display: none; }
 
+/* 低い画面のタッチ端末では、複数の枠に集中できるようヘッダーを普段は隠し、
+   枠をタップしたとき（.head-show）だけ出す */
+body.compact.touch .tile-head {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+body.compact.touch .tile.head-show .tile-head,
+body.compact.touch .tile.touch-through .tile-head {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .player-host, .player-host iframe { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+/* 映像そのものがリンクになっていて、タッチ端末では軽く触れただけで配信サイトへ
+   遷移してしまう。透明なシールドで覆ってタップを受け止め、こちらのUIだけに
+   届くようにする（プレーヤー内蔵のミュートボタンとの二重操作も同時に防げる）。
+   「直接操作」ボタン (.b-touch) を押した枠だけ一時的にシールドを外す。 */
+.tap-shield {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body.touch .tile:not(.touch-through) .tap-shield { display: block; }
+
+.b-touch { display: none; }
+body.touch .b-touch { display: inline-flex; }
+
+/* 直接操作を許可中の枠は「触ると配信サイトへ飛ぶ状態」なので分かるようにする。
+   内側(inset)だと映像のiframeに隠れてしまうため外側に出す。 */
+.tile.touch-through {
+  border-color: var(--accent-hover);
+  box-shadow: 0 0 0 2px var(--accent-hover);
+}
 
 .cover {
   position: absolute;

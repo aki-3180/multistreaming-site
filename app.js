@@ -16,6 +16,10 @@ let GAP = 6; // compactモードではさらに詰める（relayoutで更新）
 // 定数で持つとポインタ種別の判定タイミング次第で実際とずれ、タイルに死に領域ができる。
 let HEAD_H = 30;
 const isCoarse = () => window.matchMedia && matchMedia('(pointer: coarse)').matches;
+// ホーム画面から起動した「アプリ」として動いているか（iOS/Android両対応）
+const isStandalone = () =>
+  (window.matchMedia && matchMedia('(display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui)').matches) ||
+  window.navigator.standalone === true;
 
 function measureHeadH() {
   const el = tileEls.values().next().value;
@@ -40,6 +44,8 @@ const ICONS = {
   ext: '<svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   x: '<svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  lock: '<svg viewBox="0 0 24 24"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2.4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8.2 10.5V7.2a3.8 3.8 0 0 1 7.6 0v3.3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  unlock: '<svg viewBox="0 0 24 24"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2.4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8.2 10.5V7.2a3.8 3.8 0 0 1 7.2-1.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   // platform logos
   tw: '<svg viewBox="0 0 24 24"><path d="M4.3 3 3 6.4V20h4.7v2h2.6l2-2h3.9l4.8-4.8V3H4.3zm14.9 11.4-2.7 2.7h-4.3l-2 2v-2H6.5V4.7h12.7v9.7zM14.2 7.6h1.7v5h-1.7zm-4.6 0h1.7v5H9.6z" fill="#a970ff"/></svg>',
   yt: '<svg viewBox="0 0 24 24"><path d="M23 12s0-3.8-.5-5.6c-.3-1-1-1.8-2-2C18.7 4 12 4 12 4s-6.7 0-8.5.4c-1 .2-1.7 1-2 2C1 8.2 1 12 1 12s0 3.8.5 5.6c.3 1 1 1.8 2 2 1.8.4 8.5.4 8.5.4s6.7 0 8.5-.4c1-.2 1.7-1 2-2 .5-1.8.5-5.6.5-5.6z" fill="#f00"/><path d="M9.8 15.3V8.7l5.7 3.3z" fill="#fff"/></svg>',
@@ -250,11 +256,23 @@ function saveSession() {
     channels: state.channels,
     layout: state.layout,
     focusName: state.focusName,
+    // 復元時に「どれを聞いていたか」まで戻す（適用は初回タップ後・下記 pendingAudible）
+    audibleName: state.audibleName || pendingAudible,
     chatOpen: state.chatOpen,
     activeChat: state.activeChat,
     chatWidth: state.chatWidth,
     quality: state.quality,
   });
+}
+
+// 保存領域が「容量逼迫時に消してよいデータ」扱いだと、しばらく開かないだけで
+// 前回の構成が消える。アプリとして常用するので永続化を要求しておく。
+async function requestPersistentStorage() {
+  if (!navigator.storage || !navigator.storage.persist) return;
+  try {
+    if (await navigator.storage.persisted()) return;
+    await navigator.storage.persist();
+  } catch { /* ignore */ }
 }
 
 function getRecent() {
@@ -331,7 +349,13 @@ function createPlayer(key) {
       players.set(key, player);
       const P = window.Twitch.Player;
       player.addEventListener(P.READY, () => {
-        try { player.setMuted(state.audibleName !== key); } catch { /* ignore */ }
+        const m = state.audibleName !== key;
+        try {
+          player.setMuted(m);
+          if (!m && player.getVolume() === 0) player.setVolume(MIN_AUDIBLE_VOLUME);
+        } catch { /* ignore */ }
+        nativeMuted.set(key, m);
+        muteSettleAt.set(key, performance.now() + MUTE_SETTLE_MS);
       });
       player.addEventListener(P.ONLINE, () => setStatus(key, 'live'));
       // PLAYINGは広告の再生開始でも発火する。ここで画質を変えると広告が作り直されて
@@ -355,7 +379,17 @@ function createPlayer(key) {
   f.setAttribute('allow', 'autoplay; fullscreen; encrypted-media; picture-in-picture');
   f.setAttribute('allowfullscreen', '');
   if (platform === 'kick') f.dataset.muted = String(muted);
-  if (platform === 'yt') f.addEventListener('load', () => applyQuality(key));
+  if (platform === 'yt') {
+    f.addEventListener('load', () => {
+      applyQuality(key);
+      // プレーヤーの準備が整う前の宣言は無視されるので数回試す
+      ytListen(f);
+      setTimeout(() => ytListen(f), 1200);
+      setTimeout(() => ytListen(f), 4000);
+      muteSettleAt.set(key, performance.now() + MUTE_SETTLE_MS);
+    });
+  }
+  nativeMuted.set(key, muted);
   host.appendChild(f);
   playerFrames.set(key, f);
 }
@@ -369,6 +403,10 @@ function reloadPlayer(key) {
   players.delete(key);
   playerFrames.delete(key);
   appliedQuality.delete(key);
+  nativeMuted.delete(key);
+  ytVolume.delete(key);
+  ytPaused.delete(key);
+  muteSettleAt.delete(key);
   const host = document.createElement('div');
   host.className = 'player-host';
   host.id = domId(key);
@@ -391,6 +429,7 @@ function createTile(key) {
       <span class="badge loading">読込中</span>
       <span class="spacer"></span>
       <button class="t-btn b-audio" title="この配信の音声を聞く">${ICONS.volOff}</button>
+      <button class="t-btn b-touch" title="プレーヤーを直接操作する">${ICONS.lock}</button>
       <button class="t-btn b-chat" title="この配信のチャットを表示">${ICONS.chat}</button>
       <button class="t-btn b-focus" title="拡大表示（フォーカス）">${ICONS.maximize}</button>
       <button class="t-btn b-reload" title="プレーヤーを再読み込み">${ICONS.reload}</button>
@@ -399,6 +438,7 @@ function createTile(key) {
     </div>
     <div class="tile-body">
       <div class="player-host" id="${domId(key)}"></div>
+      <div class="tap-shield" aria-hidden="true"></div>
       <div class="cover hidden">
         <div class="cover-msg">配信はオフラインです</div>
         <button class="cover-reload">再読み込み</button>
@@ -420,10 +460,15 @@ function createTile(key) {
     window.open(watchUrl(key), '_blank', 'noopener'));
   $('.b-close', el).addEventListener('click', () => removeChannel(key));
   $('.cover-reload', el).addEventListener('click', () => reloadPlayer(key));
+  $('.b-touch', el).addEventListener('click', () => setTouchThrough(key, !touchThrough.has(key)));
+
+  // --- タッチ端末: 映像を触っただけで配信サイトへ飛ばされるのを防ぐ
+  $('.tap-shield', el).addEventListener('pointerdown', () => revealHead(key));
 
   // --- ドラッグで並べ替え（Pointer Events: マウス・タッチ両対応）
   const head = $('.tile-head', el);
   wireTileDrag(el, head, key);
+  head.addEventListener('pointerdown', () => revealHead(key));
   head.addEventListener('dblclick', (e) => {
     if (!e.target.closest('.t-btn')) toggleFocusTile(key);
   });
@@ -431,7 +476,64 @@ function createTile(key) {
   stage.appendChild(el);
   tileEls.set(key, el);
   setStatus(key, 'loading');
+  // 追加直後は操作できるようヘッダーを一度出す（compactでは通常隠れているため）
+  revealHead(key);
   createPlayer(key);
+}
+
+// ---------------------------------------------------------------- タッチ操作
+// 映像そのものはリンクになっていて、軽く触れただけで配信サイトへ遷移してしまう。
+// タッチ端末では透明なシールドで覆い、タップはこちらのUIだけに届くようにする。
+// （プレーヤー内蔵のミュートボタンが効かなくなるので、こちら側のミュートと
+//   二重になって状態が食い違う問題も同時に解消される）
+const touchThrough = new Set();
+const touchThroughTimers = new Map();
+// 直接操作を許可したままだと誤タップ防止の意味が薄れるので、一定時間で自動的に戻す
+const TOUCH_THROUGH_MS = 30000;
+let touchThroughHinted = false;
+
+function setTouchThrough(key, on) {
+  const el = tileEls.get(key);
+  if (!el) return;
+  clearTimeout(touchThroughTimers.get(key));
+  touchThroughTimers.delete(key);
+  if (on) {
+    touchThrough.add(key);
+    touchThroughTimers.set(key, setTimeout(() => setTouchThrough(key, false), TOUCH_THROUGH_MS));
+    if (!touchThroughHinted) {
+      touchThroughHinted = true;
+      toast('プレーヤーを直接操作できます（30秒で自動的に戻ります）', 'accent', 3600);
+    }
+  } else {
+    touchThrough.delete(key);
+  }
+  el.classList.toggle('touch-through', on);
+  const b = $('.b-touch', el);
+  b.classList.toggle('on', on);
+  b.innerHTML = on ? ICONS.unlock : ICONS.lock;
+  b.title = on ? 'タップの誤操作防止に戻す' : 'プレーヤーを直接操作する';
+  if (on) revealHead(key);
+}
+
+function lockAllTouchThrough() {
+  for (const key of [...touchThrough]) setTouchThrough(key, false);
+}
+
+// compact（横持ちなど低い画面）ではヘッダーが映像に重なって視界に入るので、
+// 普段は隠しておき、枠を触ったときだけ出す。
+const HEAD_SHOW_MS = 3000;
+const headShowTimers = new Map();
+
+function revealHead(key) {
+  const el = tileEls.get(key);
+  if (!el) return;
+  el.classList.add('head-show');
+  clearTimeout(headShowTimers.get(key));
+  headShowTimers.set(key, setTimeout(() => {
+    headShowTimers.delete(key);
+    // 直接操作中はヘッダーが唯一の戻り道なので出したままにする
+    if (!touchThrough.has(key)) el.classList.remove('head-show');
+  }, HEAD_SHOW_MS));
 }
 
 function toggleFocusTile(key) {
@@ -464,6 +566,9 @@ function wireTileDrag(el, head, key) {
         dragging = true;
         el.classList.add('drag-src');
         el.style.zIndex = '40';
+        // ドラッグ中にヘッダーの自動非表示が走ると掴んでいる対象が消えてしまう
+        clearTimeout(headShowTimers.get(key));
+        headShowTimers.delete(key);
       }
       el.style.transform = `translate(${dx}px, ${dy}px)`;
       const under = document.elementFromPoint(ev.clientX, ev.clientY);
@@ -487,6 +592,7 @@ function wireTileDrag(el, head, key) {
       }
       if (!dragging) return;
       el.classList.remove('drag-src');
+      revealHead(key);
       if (ev.type === 'pointerup' && lastTarget) {
         handleDropSwap(key, lastTarget);
       } else {
@@ -525,16 +631,25 @@ function flashTile(key) {
 }
 
 // ---------------------------------------------------------------- audio
+// 音量0のままミュートだけ解除しても無音のままで「ボタンは点いているのに聞こえない」
+// 状態になる。プレーヤー内蔵UIで0まで絞られている場合があるので必ず戻す。
+const MIN_AUDIBLE_VOLUME = 0.5;
+
 function applyMute(key, muted) {
   const { platform } = parseEntry(key);
   if (platform === 'tw') {
     const p = players.get(key);
-    if (p) { try { p.setMuted(muted); } catch { /* ignore */ } }
+    if (p) {
+      try {
+        p.setMuted(muted);
+        if (!muted && p.getVolume() === 0) p.setVolume(MIN_AUDIBLE_VOLUME);
+      } catch { /* ignore */ }
+    }
   } else if (platform === 'yt') {
     const f = playerFrames.get(key);
     if (f && f.contentWindow) {
-      f.contentWindow.postMessage(
-        JSON.stringify({ event: 'command', func: muted ? 'mute' : 'unMute', args: [] }), '*');
+      ytPost(f, muted ? 'mute' : 'unMute');
+      if (!muted && ytVolume.get(key) === 0) ytPost(f, 'setVolume', [MIN_AUDIBLE_VOLUME * 100]);
     }
   } else if (platform === 'kick') {
     // Kickは実行時の音声APIが無いため、ミュート状態が変わったらパラメータを変えて再読込
@@ -544,10 +659,12 @@ function applyMute(key, muted) {
       f.src = kickSrc(parseEntry(key).id, muted);
     }
   }
+  nativeMuted.set(key, muted);
 }
 
 function setAudible(key) {
   state.audibleName = key;
+  muteWriteAt = performance.now();
   for (const k of state.channels) applyMute(k, k !== key);
   updateAudibleUI();
   saveSession();
@@ -563,6 +680,93 @@ function updateAudibleUI() {
     b.title = on ? 'ミュートする' : 'この配信の音声を聞く';
   }
   btn.mute.classList.toggle('audible', !!state.audibleName);
+}
+
+// --- プレーヤー内蔵のミュートボタンとの同期 -------------------------------
+// 埋め込みプレーヤー側にもミュートボタンがあり、そちらで操作されるとこちらの
+// 表示と実際の音声がずれる（両方鳴る / ボタンは点いているのに無音、など）。
+// 実際の状態を読み取り、食い違っていたら「最後に操作されたほう」に合わせる。
+const nativeMuted = new Map();   // key -> 実際にミュートされているか
+const ytVolume = new Map();      // key -> YouTubeの音量(0-100)
+const ytPaused = new Map();      // key -> YouTubeが一時停止中か
+const muteSettleAt = new Map();  // key -> この時刻までの読み値は初期化中とみなす
+let muteWriteAt = 0;             // こちらから書き込んだ直後は読み値が追いつかない
+
+const MUTE_SYNC_MS = 900;
+const MUTE_WRITE_GRACE_MS = 1500;
+// 初期化中のプレーヤーは一時的に不正確な値を返す。これを「ユーザーが操作した」と
+// 誤認して勝手に音を出さないよう、落ち着くまで読み値を採用しない。
+const MUTE_SETTLE_MS = 2500;
+let muteSyncTimer = null;
+
+function ytPost(frame, func, args = []) {
+  if (!frame || !frame.contentWindow) return;
+  try {
+    frame.contentWindow.postMessage(
+      JSON.stringify({ event: 'command', func, args }), '*');
+  } catch { /* ignore */ }
+}
+
+// infoDelivery（音量・ミュート状態の通知）を受け取るには購読を宣言する必要がある
+function ytListen(frame) {
+  if (!frame || !frame.contentWindow) return;
+  try {
+    frame.contentWindow.postMessage(
+      JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), '*');
+  } catch { /* ignore */ }
+}
+
+function keyOfSource(source) {
+  for (const [k, f] of playerFrames) if (f.contentWindow === source) return k;
+  return null;
+}
+
+function onFrameMessage(e) {
+  if (!/^https:\/\/(www\.)?youtube(-nocookie)?\.com$/.test(e.origin)) return;
+  let d;
+  try { d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch { return; }
+  if (!d || !d.info) return;
+  const key = keyOfSource(e.source);
+  if (!key) return;
+  // playerState: 1=再生中 2=一時停止（復帰時に勝手に再開させないための判定材料）
+  if (typeof d.info.playerState === 'number') ytPaused.set(key, d.info.playerState === 2);
+  if (typeof d.info.volume === 'number') ytVolume.set(key, d.info.volume);
+  if (typeof d.info.muted === 'boolean' || typeof d.info.volume === 'number') {
+    const vol = ytVolume.get(key);
+    const muted = d.info.muted === true || vol === 0;
+    nativeMuted.set(key, muted);
+    reconcileMute(key, muted);
+  }
+}
+
+// プレーヤー側が「ミュート解除された」状態なら、その配信を聞きたいという意思表示
+// とみなして音声ソロ切替を追従させる（逆にミュートされたら全ミュート扱い）。
+function reconcileMute(key, muted) {
+  if (performance.now() - muteWriteAt < MUTE_WRITE_GRACE_MS) return;
+  if (performance.now() < (muteSettleAt.get(key) || Infinity)) return;
+  if (!state.channels.includes(key)) return;
+  const expected = state.audibleName !== key;
+  if (muted === expected) return;
+  if (!muted) setAudible(key);
+  else if (state.audibleName === key) setAudible(null);
+}
+
+function pollNativeMute() {
+  if (document.hidden) return;
+  if (performance.now() - muteWriteAt < MUTE_WRITE_GRACE_MS) return;
+  for (const [key, p] of players) {
+    let muted;
+    try { muted = p.getMuted() === true || p.getVolume() === 0; } catch { continue; }
+    if (nativeMuted.get(key) === muted) continue;
+    nativeMuted.set(key, muted);
+    reconcileMute(key, muted);
+  }
+}
+
+function startMuteSync() {
+  if (muteSyncTimer) return;
+  // TwitchのAPIにはミュート変更イベントが無いため、ごく軽いポーリングで拾う
+  muteSyncTimer = setInterval(pollNativeMute, MUTE_SYNC_MS);
 }
 
 // ---------------------------------------------------------------- quality
@@ -728,14 +932,19 @@ function ensureChatFrame(key) {
 // コメントがほとんど残らない。基準幅でレンダリングしてパネルサイズまで縮小表示すると、
 // 固定UIごと小さくなり同じ面積に多くのコメントが入る（iOSでの横見切れも防げる）。
 const CHAT_BASE_W = 330;
-const CHAT_MIN_SCALE = 0.7;
+// 埋め込みチャットには内部の最小幅があり、これを下回る論理幅で描画すると
+// 右端（YouTubeなら絵文字・送信ボタンやメニュー）がはみ出して見切れる。
+// 縮小率の下限で論理幅が痩せないよう、プラットフォームごとに必要幅を持つ。
+const CHAT_LOGICAL_W = { yt: 380, tw: 330, kick: 330 };
+const CHAT_MIN_SCALE = 0.4;
 
 function fitChatFrames() {
   const w = chatFramesEl.clientWidth;
   const h = chatFramesEl.clientHeight;
   if (!w || !h) return;
-  const scale = clamp(w / CHAT_BASE_W, CHAT_MIN_SCALE, 1);
   chatFramesEl.querySelectorAll('iframe.chat-frame').forEach((f) => {
+    const base = CHAT_LOGICAL_W[parseEntry(f.dataset.name).platform] || CHAT_BASE_W;
+    const scale = clamp(w / base, CHAT_MIN_SCALE, 1);
     if (scale >= 1) {
       f.style.width = '';
       f.style.height = '';
@@ -754,7 +963,13 @@ function fitChatFrames() {
 // 一定時間表示されなかったものは破棄し、再表示時に読み込み直す。
 // タブを行き来する操作で毎回リロードしないよう、少し猶予を置く。
 const CHAT_RELEASE_MS = 20000;
+// ただしアプリとして常用する場合、破棄＝再読込のたびにログイン状態を確立し直す
+// ことになる（サードパーティCookieが制限された環境では特に不安定）。
+// ホーム画面から起動しているときは長めに保持してログインを維持しやすくする。
+const CHAT_RELEASE_APP_MS = 180000;
 const chatReleaseTimers = new Map();
+
+const chatReleaseMs = () => (isStandalone() ? CHAT_RELEASE_APP_MS : CHAT_RELEASE_MS);
 
 function cancelChatRelease(key) {
   clearTimeout(chatReleaseTimers.get(key));
@@ -766,10 +981,13 @@ function scheduleChatRelease(key) {
   chatReleaseTimers.set(key, setTimeout(() => {
     chatReleaseTimers.delete(key);
     if (state.activeChat === key) return;
+    // バックグラウンド中の破棄は「復帰したら全部読み込み直し」になるだけで
+    // 得が無いので、戻ってきてから改めて数える
+    if (document.hidden) { scheduleChatRelease(key); return; }
     const f = chatEls.get(key);
     if (f) f.remove();
     chatEls.delete(key);
-  }, CHAT_RELEASE_MS));
+  }, chatReleaseMs()));
 }
 
 function setActiveChat(key) {
@@ -924,6 +1142,8 @@ function relayout(animate = false) {
   const compact = vpH() < 500;
   GAP = compact ? 5 : 6;
   document.body.classList.toggle('compact', compact);
+  // タッチ端末向けの挙動（タップシールド・ヘッダー自動非表示）はCSS側で分岐する
+  document.body.classList.toggle('touch', isCoarse());
   // ヘッダーの扱いは compact 状態で変わるので、クラス適用後に測る
   measureHeadH();
   if (!compact) document.body.classList.remove('tb-open');
@@ -1012,6 +1232,15 @@ function _remove(key) {
   if (f) f.remove();
   chatEls.delete(key);
   cancelChatRelease(key);
+  nativeMuted.delete(key);
+  ytVolume.delete(key);
+  ytPaused.delete(key);
+  muteSettleAt.delete(key);
+  touchThrough.delete(key);
+  clearTimeout(touchThroughTimers.get(key));
+  touchThroughTimers.delete(key);
+  clearTimeout(headShowTimers.get(key));
+  headShowTimers.delete(key);
 }
 
 function afterMutation(animate = true) {
@@ -1030,6 +1259,7 @@ function afterMutation(animate = true) {
   saveSession();
   renderRecent();
   updateTitle();
+  updateWakeLock();
 }
 
 function addChannels(keys) {
@@ -1260,6 +1490,94 @@ function setLayout(mode) {
   saveSession();
 }
 
+// ---------------------------------------------------------------- アプリとしての継続性
+// スマホではホーム画面から「アプリ」として使う想定。ブラウザのタブと違い、
+// 画面消灯や他アプリへの切り替えでプレーヤーが止まり、戻ると広告から始まり直す。
+// 埋め込み先のログインCookieはこちらから触れないので、
+// 「止めない・作り直さない・状態を失わない」の3点でできる限り近づける。
+
+// 1) 視聴中は画面を消させない（消灯 → 復帰時のプリロール広告を根本から減らす）
+let wakeLock = null;
+
+async function updateWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  const want = isCoarse() && state.channels.length > 0 && !document.hidden;
+  try {
+    if (want && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } else if (!want && wakeLock) {
+      const wl = wakeLock;
+      wakeLock = null;
+      await wl.release();
+    }
+  } catch { wakeLock = null; }
+}
+
+// 2) 復帰時はプレーヤーを作り直さず、止まっていたら再開させるだけにする
+//    （作り直すと必ず広告からになる）。
+//    ただし離脱前から自分で止めていたものは、勝手に鳴り出さないよう触らない。
+const pausedOnHide = new Set();
+
+function notePausedOnHide() {
+  pausedOnHide.clear();
+  for (const [key, p] of players) {
+    try { if (p.isPaused()) pausedOnHide.add(key); } catch { /* ignore */ }
+  }
+  for (const [key, paused] of ytPaused) if (paused) pausedOnHide.add(key);
+}
+
+function resumePlayers() {
+  for (const [key, p] of players) {
+    if (pausedOnHide.has(key)) continue;
+    try { if (p.isPaused()) p.play(); } catch { /* ignore */ }
+  }
+  for (const [key, f] of playerFrames) {
+    if (parseEntry(key).platform !== 'yt' || pausedOnHide.has(key)) continue;
+    ytPost(f, 'playVideo');
+  }
+}
+
+// 3) 音声ソロの復元。読み込み直後に音を出そうとすると自動再生がブロックされ、
+//    映像ごと始まらないことがある。最初のタップ/キー入力まで待ってから適用する。
+let pendingAudible = null;
+
+function applyPendingAudible() {
+  const key = pendingAudible;
+  pendingAudible = null;
+  if (!key || !state.channels.includes(key)) return;
+  setAudible(key);
+  toast(`${displayName(key)} の音声を復元しました`, 'accent');
+}
+
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
+  navigator.serviceWorker.register('./sw.js').catch(() => { /* ignore */ });
+}
+
+function wireLifecycle() {
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      // モバイルではタブ破棄前にこれしか来ないことがあるので必ず保存する
+      saveSession();
+      notePausedOnHide();
+      return;
+    }
+    updateWakeLock();
+    resumePlayers();
+    // 復帰直後の誤タップで配信サイトへ飛ばないよう、直接操作は解除しておく
+    lockAllTouchThrough();
+  });
+  window.addEventListener('pagehide', saveSession);
+
+  const onFirstGesture = () => {
+    if (pendingAudible) applyPendingAudible();
+    updateWakeLock();
+  };
+  document.addEventListener('pointerdown', onFirstGesture, { once: true });
+  document.addEventListener('keydown', onFirstGesture, { once: true });
+}
+
 // ---------------------------------------------------------------- wiring
 function wireToolbar() {
   addForm.addEventListener('submit', (e) => {
@@ -1337,9 +1655,17 @@ function wireToolbar() {
     toast(`プリセット「${name}」を保存しました`, 'accent');
   });
 
-  // compactモード: ハンドルでツールバーを開閉
-  $('#tb-toggle').addEventListener('click', () =>
-    document.body.classList.toggle('tb-open'));
+  // compactモード: ハンドルでツールバーを開閉。
+  // 画面最上部の細い当たり判定なので、clickを待たず pointerdown で確定させる
+  // （タッチだとブラウザのエッジジェスチャに吸われてclickまで届かないことがある）。
+  const tbToggle = $('#tb-toggle');
+  tbToggle.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); // 続くclickの二重発火を止める
+    document.body.classList.toggle('tb-open');
+  });
+  tbToggle.addEventListener('click', (e) => {
+    if (e.detail === 0) document.body.classList.toggle('tb-open'); // キーボード操作
+  });
 
   // 横画面推奨ヒント: タップで全画面（+横画面ロック）、×で閉じる
   rotateHint.addEventListener('click', () => toggleFullscreen());
@@ -1442,6 +1768,11 @@ function init() {
   wireToolbar();
   wireResizer();
   wireKeyboard();
+  wireLifecycle();
+  registerServiceWorker();
+  requestPersistentStorage();
+  startMuteSync();
+  window.addEventListener('message', onFrameMessage);
 
   const fromHash = readHash();
   const initial = fromHash.length
@@ -1452,6 +1783,9 @@ function init() {
   if (savedChat && state.channels.includes(savedChat)) {
     setActiveChat(savedChat);
   }
+  // 音声は自動再生ブロックを避けるため、最初の操作まで保留する
+  const savedAudible = sess && normalizeKey(sess.audibleName);
+  if (savedAudible && state.channels.includes(savedAudible)) pendingAudible = savedAudible;
   renderRecent();
 
   window.addEventListener('hashchange', () => {

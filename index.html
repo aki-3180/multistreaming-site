@@ -2,11 +2,22 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8">
+  <!-- viewport-fit は既定(contain)のまま。cover にするとノッチ下に映像が潜り込み、
+       絶対配置のタイル座標とセーフエリアがずれるため。 -->
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b0b0f">
   <meta name="description" content="Twitch・YouTube・Kickの配信を同時に視聴できるマルチストリームビューア。チャットにログインしてコメントも可能。">
   <title>MultiView — 複数配信を同時視聴 (Twitch / YouTube / Kick)</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%239146ff'/%3E%3Cpath d='M5 5h6v6H5zM13 5h6v6h-6zM5 13h6v6H5z' fill='white'/%3E%3Cpath d='M14.5 13.5l5 2.5-5 2.5z' fill='white'/%3E%3C/svg%3E">
+
+  <!-- ホーム画面に追加して「アプリ」として使うための設定 -->
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="MultiView">
+
   <link rel="stylesheet" href="./styles.css">
   <script src="https://player.twitch.tv/js/embed/v1.js"></script>
 </head>
@@ -191,8 +202,25 @@
     <ul>
       <li><b>横画面での視聴がおすすめです。</b>縦持ち時に表示されるヒント、または全画面ボタンをタップすると全画面＋横画面に固定されます（対応ブラウザのみ。iPhoneは手動で回転してください）</li>
       <li>横持ちなど低い画面ではツールバーが自動で隠れ、映像とチャットに全画面を使います。上部中央のハンドル（▾）でツールバーを開閉できます</li>
+      <li>横持ちのときは<b>各枠の上のバーも普段は隠れます</b>。枠をタップすると数秒だけ出るので、音声切替や並べ替えはそのときに行ってください</li>
       <li>チャットは縦持ちで画面下部、横持ちで右側の1枠として表示されます</li>
     </ul>
+
+    <h3>スマホで「アプリ」として使う</h3>
+    <p>
+      ブラウザのメニューから<b>「ホーム画面に追加」</b>（Android: 「アプリをインストール」）を選ぶと、
+      アドレスバーの無い独立したアプリとして起動できます。前回の構成・音声・チャットのタブはそのまま復元されます。
+    </p>
+    <ul>
+      <li><b>誤タップ防止</b> — 映像そのものが配信サイトへのリンクになっているため、タッチ端末では枠を薄いシールドで覆っています。タップしてもサイトへ飛ばず、枠のバーが出るだけです。プレーヤー内蔵のボタン（画質・全画面など）を使いたいときは、バーの<b>鍵ボタン</b>で一時的に解除できます（30秒で自動的に戻ります）</li>
+      <li><b>ミュートの二重操作</b> — 上記のシールドにより、プレーヤー内蔵のミュートとこちらのミュートが食い違うことがなくなります。鍵を外して内蔵ボタンを操作した場合も、こちらの表示が自動で追従します</li>
+      <li><b>視聴中は画面が消えません</b>（対応ブラウザのみ）。画面が消えて復帰すると再生が作り直され、広告から始まってしまうためです</li>
+      <li>他のアプリに切り替えて戻ったときは、プレーヤーを作り直さずに再開します（自分で一時停止していたものはそのままです）</li>
+    </ul>
+    <p class="note">
+      なお、<b>チャットのログインCookieは各サービス側のもの</b>で、このサイトから保存・復元することはできません。
+      ログインが持続しない場合は、上の「チャットへのログイン・コメント」の対処をご覧ください。
+    </p>
 
     <h3>Twitchの広告が進まない・配信が始まらないとき</h3>
     <p>
@@ -225,7 +253,7 @@
 
     <h3>その他</h3>
     <ul>
-      <li>タイルのヘッダー（チャンネル名のバー）をドラッグすると配置を入れ替えられます。スマホでもタッチで操作できます</li>
+      <li>タイルのヘッダー（チャンネル名のバー）をドラッグすると配置を入れ替えられます。スマホでもタッチで操作できます（横持ちではまず枠をタップしてバーを出してください）</li>
       <li>すべての配信は常に1画面に収まるよう自動レイアウトされます（スクロールなし）</li>
       <li>画面幅が狭いとき（スマホ等）は、チャットも画面内の1つの枠として表示されます</li>
       <li>「URLをコピー」で現在の構成を共有できます（例: <code>#shroud/pokimane</code>）</li>
