@@ -359,10 +359,13 @@ function createPlayer(key) {
         try { player.setMuted(m); } catch { /* ignore */ }
         nativeMuted.set(key, m);
         muteSettleAt.set(key, performance.now() + MUTE_SETTLE_MS);
-        // 音量まわり（バックグラウンド維持など）は再生が始まってから適用する。
-        // 開始直後に触ると自動再生の判定に巻き込まれて止まることがあるため。
+        // 音量まわり（バックグラウンド維持）は再生が始まってから適用する。
+        // ただし維持モードを使っていないときは上の setMuted だけで足りている。
+        // 操作から切り離されたタイミングでのミュート解除は、iOSでは自動再生の
+        // 判定に引っかかって再生が止まり得る（＝再開時に広告になる）ので呼ばない。
         setTimeout(() => {
-          if (players.get(key) === player) applyMute(key, state.audibleName !== key);
+          if (players.get(key) !== player || !keepAliveActive()) return;
+          applyMute(key, state.audibleName !== key);
         }, MUTE_SETTLE_MS);
       });
       player.addEventListener(P.ONLINE, () => setStatus(key, 'live'));
@@ -396,8 +399,10 @@ function createPlayer(key) {
       setTimeout(() => ytListen(f), 1200);
       setTimeout(() => ytListen(f), 4000);
       muteSettleAt.set(key, performance.now() + MUTE_SETTLE_MS);
+      // 維持モードのときだけ音量を触る（理由はTwitch側の同じ箇所を参照）
       setTimeout(() => {
-        if (playerFrames.get(key) === f) applyMute(key, state.audibleName !== key);
+        if (playerFrames.get(key) !== f || !keepAliveActive()) return;
+        applyMute(key, state.audibleName !== key);
       }, MUTE_SETTLE_MS);
     });
   }
