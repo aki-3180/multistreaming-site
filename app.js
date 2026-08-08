@@ -104,9 +104,11 @@ const state = {
   keepAlive: false,    // バックグラウンドでも再生を止めない（実験的・keepAliveActive 参照）
 };
 
-// 画質。過剰な解像度はデコード負荷＝発熱の主因なので、既定はタイルの実寸に合わせる
+// 画質。過剰な解像度はデコード負荷＝発熱の主因だが、画質の指定は
+// 再生セッションの作り直しを伴う（実測でPAUSE→PLAYが発火する）ため、
+// Twitchでは指定するたびに広告が入り直しうる。既定では触らない。
 const QUALITY_OPTIONS = [
-  { id: 'auto', label: '自動', desc: 'スマホのみタイルの大きさに合わせる（推奨）' },
+  { id: 'auto', label: '自動（推奨）', desc: '配信側の自動選択に任せる。広告が増えません' },
   { id: 'source', label: '最高画質', desc: '配信元のまま。負荷は最大' },
   { id: '720', label: '高画質 720p', desc: '' },
   { id: '480', label: '標準 480p', desc: '' },
@@ -882,13 +884,10 @@ function startMuteSync() {
 
 // ---------------------------------------------------------------- quality
 // 表示サイズより高い解像度で再生してもCPU/GPUを浪費するだけなので、
-// 必要な高さ（CSSピクセル）を求めて、それを満たす最小の画質を選ぶ。
-function targetHeightFor(key) {
-  if (state.quality === 'source') return Infinity;
-  if (state.quality !== 'auto') return Number(state.quality);
-  const el = tileEls.get(key);
-  if (!el) return 360;
-  return Math.max(160, Math.round(el.clientHeight - HEAD_H));
+// 指定された高さ（CSSピクセル）を満たす最小の画質を選ぶ。
+// 「自動」では applyQuality が何もしないため、ここに来るのは明示指定のときだけ。
+function targetHeight() {
+  return state.quality === 'source' ? Infinity : Number(state.quality);
 }
 
 // setQuality はプレーヤーの再生を作り直すため、呼ぶたびにプリロール広告が
@@ -898,9 +897,10 @@ const appliedQuality = new Map();
 function applyQuality(key) {
   const { platform } = parseEntry(key);
 
-  // PCは自動制御しない。デコード余力が十分ある一方、画質切替による作り直しで
-  // 広告が繰り返し挿入され、視聴できなくなる副作用のほうが大きいため。
-  if (state.quality === 'auto' && !isCoarse()) {
+  // 「自動」では画質に一切触らない。setQuality はPCでもスマホでも再生を破棄して
+  // 作り直す（実測で PAUSE → PLAY が発火する）ので、Twitchでは呼ぶたびに
+  // 広告が入り直しうる。発熱対策で解像度を下げたい場合は明示的に選んでもらう。
+  if (state.quality === 'auto') {
     if (platform === 'tw') {
       const prev = appliedQuality.get(key);
       const p = players.get(key);
@@ -912,7 +912,7 @@ function applyQuality(key) {
     return;
   }
 
-  const target = targetHeightFor(key);
+  const target = targetHeight();
 
   if (platform === 'tw') {
     const p = players.get(key);
