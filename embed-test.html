@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>埋め込みプレーヤー診断 — MultiView</title>
+<script src="https://player.twitch.tv/js/embed/v1.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 12px; background: #0b0b0f; color: #efeff4;
+    font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", Meiryo, system-ui, sans-serif;
+    font-size: 14px; line-height: 1.6;
+  }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  .sub { color: #9d9daa; font-size: 12px; margin: 0 0 12px; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+  input {
+    flex: 1 1 160px; min-width: 0; background: #1d1d26; color: #efeff4;
+    border: 1px solid #2b2b36; border-radius: 8px; padding: 9px 10px; font: inherit; font-size: 16px;
+  }
+  button {
+    background: #1d1d26; color: #efeff4; border: 1px solid #2b2b36; border-radius: 8px;
+    padding: 10px 14px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button.primary { background: #9146ff; border-color: #9146ff; }
+  button:active { filter: brightness(1.3); }
+  #player { width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 8px; overflow: hidden; }
+  section { border: 1px solid #2b2b36; border-radius: 10px; padding: 10px 12px; margin: 10px 0; background: #141419; }
+  h2 { font-size: 12px; margin: 0 0 6px; color: #a970ff; letter-spacing: .04em; }
+  pre {
+    margin: 0; font-size: 11.5px; line-height: 1.7; white-space: pre-wrap; word-break: break-all;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #cfcfda;
+  }
+  #log { max-height: 34vh; overflow-y: auto; }
+  #log b { color: #ffd479; }
+  .hint { color: #9d9daa; font-size: 12px; }
+  .hint b { color: #efeff4; }
+  ol { margin: 6px 0; padding-left: 1.3em; }
+</style>
+</head>
+<body>
+
+<h1>埋め込みプレーヤー診断</h1>
+<p class="sub">「一時停止 → 再生」で広告が入るかを、アプリ本体から切り離して確かめるためのページです。</p>
+
+<div class="row">
+  <input id="ch" type="text" placeholder="チャンネル名（例: shroud）" spellcheck="false" autocapitalize="off">
+  <button class="primary" id="load">読み込む</button>
+</div>
+
+<div id="player"></div>
+
+<div class="row">
+  <button id="pause">一時停止</button>
+  <button id="play">再生</button>
+  <button id="mute">ミュート切替</button>
+  <button id="reload">プレーヤーを作り直す</button>
+  <button id="clear">ログを消す</button>
+</div>
+
+<section>
+  <h2>調べかた</h2>
+  <ol class="hint">
+    <li>チャンネル名を入れて読み込み、最初の広告が終わって配信が映るまで待つ</li>
+    <li><b>一時停止</b> → 数秒待つ → <b>再生</b>。ここで広告が出るかを見る</li>
+    <li>下のログで <b>PAUSE → PLAY</b> のあと <b>PLAYING</b> がどう出るか、
+      統計の <b>latency</b>（配信からの遅延）が大きく飛ぶかを見る。飛んでいれば再生が作り直されている</li>
+    <li>同じ端末の同じブラウザで <b>twitch.tv を直接開いた場合</b>と比べる</li>
+  </ol>
+</section>
+
+<section>
+  <h2>イベントログ</h2>
+  <pre id="log">まだ読み込んでいません</pre>
+</section>
+
+<section>
+  <h2>再生の統計（1秒ごと）</h2>
+  <pre id="stats">—</pre>
+</section>
+
+<section>
+  <h2>この端末の環境</h2>
+  <pre id="env">—</pre>
+</section>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const logEl = $('#log');
+let player = null;
+let lines = [];
+let t0 = 0;
+
+function log(msg) {
+  const t = t0 ? ((performance.now() - t0) / 1000).toFixed(1) : '0.0';
+  lines.push(`<b>${t.padStart(6)}s</b>  ${msg}`);
+  if (lines.length > 200) lines.shift();
+  logEl.innerHTML = lines.join('\n');
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function load(channel) {
+  if (!/^[A-Za-z0-9_]{2,25}$/.test(channel)) { log('チャンネル名が不正です'); return; }
+  location.hash = channel;
+  $('#player').innerHTML = '';
+  lines = [];
+  t0 = performance.now();
+  log('プレーヤーを生成: ' + channel);
+  player = new Twitch.Player('player', {
+    channel, parent: [location.hostname],
+    width: '100%', height: '100%', autoplay: true, muted: true,
+  });
+  const P = Twitch.Player;
+  // 再生セッションの開始・終了が分かるイベントを全部拾う
+  for (const name of ['READY', 'PLAY', 'PLAYING', 'PAUSE', 'ENDED', 'ONLINE', 'OFFLINE']) {
+    if (P[name]) player.addEventListener(P[name], () => log(name));
+  }
+}
+
+setInterval(() => {
+  if (!player) return;
+  let s;
+  try { s = player.getPlaybackStats(); } catch { return; }
+  if (!s) return;
+  let quality = '?';
+  try { quality = player.getQuality(); } catch { /* ignore */ }
+  let paused = '?';
+  try { paused = String(player.isPaused()); } catch { /* ignore */ }
+  $('#stats').textContent =
+    `paused    : ${paused}\n` +
+    `quality   : ${quality}\n` +
+    `resolution: ${s.videoResolution}\n` +
+    `latency   : ${s.hlsLatencyBroadcaster}s   ← 大きく飛んだら作り直し\n` +
+    `buffer    : ${(s.bufferSize || 0).toFixed(2)}s\n` +
+    `bitrate   : ${s.playbackRate} kbps\n` +
+    `fps       : ${s.fps}   skipped: ${s.skippedFrames}`;
+}, 1000);
+
+$('#load').addEventListener('click', () => load($('#ch').value.trim().toLowerCase()));
+$('#pause').addEventListener('click', () => { log('— 操作: pause()'); try { player.pause(); } catch (e) { log('err ' + e.message); } });
+$('#play').addEventListener('click', () => { log('— 操作: play()'); try { player.play(); } catch (e) { log('err ' + e.message); } });
+$('#mute').addEventListener('click', () => {
+  try { const m = !player.getMuted(); player.setMuted(m); log('— 操作: setMuted(' + m + ')'); }
+  catch (e) { log('err ' + e.message); }
+});
+$('#reload').addEventListener('click', () => load($('#ch').value.trim().toLowerCase()));
+$('#clear').addEventListener('click', () => { lines = []; logEl.textContent = '(クリア)'; });
+
+(async () => {
+  const standalone = (matchMedia('(display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui)').matches)
+    || window.navigator.standalone === true;
+  let sa = 'n/a';
+  try { sa = String(await document.hasStorageAccess()); } catch (e) { sa = 'err ' + e.name; }
+  let tlsa = 'n/a';
+  try {
+    tlsa = (await navigator.permissions.query({ name: 'top-level-storage-access', requestedOrigin: 'https://www.twitch.tv' })).state;
+  } catch (e) { tlsa = 'n/a (' + e.name + ')'; }
+  $('#env').textContent =
+    `UA        : ${navigator.userAgent}\n` +
+    `画面      : ${innerWidth}x${innerHeight} dpr=${devicePixelRatio}\n` +
+    `アプリ起動 : ${standalone}\n` +
+    `cookie有効 : ${navigator.cookieEnabled}\n` +
+    `hasStorageAccess          : ${sa}\n` +
+    `top-level-storage-access  : ${tlsa}`;
+})();
+
+const fromHash = decodeURIComponent(location.hash.replace(/^#/, ''));
+if (fromHash) { $('#ch').value = fromHash; load(fromHash); }
+</script>
+</body>
+</html>
