@@ -231,6 +231,10 @@ input::placeholder { color: var(--text-dim); opacity: 0.75; }
   box-shadow: var(--shadow);
   padding: 12px;
   z-index: 120;
+  /* 横持ちスマホでは画面が低いので、はみ出したぶんはパネル内でスクロールさせる */
+  max-height: calc(100dvh - var(--toolbar-h) - 12px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .pop-title { font-weight: 700; font-size: 13px; margin-bottom: 10px; }
@@ -243,6 +247,9 @@ input::placeholder { color: var(--text-dim); opacity: 0.75; }
 }
 
 .pop-note-sub { margin: 10px 0 0; }
+.pop-sep { height: 1px; background: var(--border); margin: 12px -12px; }
+.q-item:disabled { opacity: 0.45; cursor: default; }
+.q-item:disabled:hover { background: none; }
 
 .q-item {
   display: flex;

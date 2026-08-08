@@ -72,6 +72,8 @@ const presetsPop = $('#presets-pop');
 const presetList = $('#preset-list');
 const qualityPop = $('#quality-pop');
 const qualityList = $('#quality-list');
+const keepAliveItem = $('#keepalive-item');
+const keepAliveNa = $('#keepalive-na');
 const btn = {
   layoutGrid: $('#layout-grid-btn'),
   layoutFocus: $('#layout-focus-btn'),
@@ -99,6 +101,7 @@ const state = {
   activeChat: null,
   chatWidth: 340,
   quality: 'auto',
+  keepAlive: false,    // バックグラウンドでも再生を止めない（実験的・keepAliveActive 参照）
 };
 
 // 画質。過剰な解像度はデコード負荷＝発熱の主因なので、既定はタイルの実寸に合わせる
@@ -262,6 +265,7 @@ function saveSession() {
     activeChat: state.activeChat,
     chatWidth: state.chatWidth,
     quality: state.quality,
+    keepAlive: state.keepAlive,
   });
 }
 
@@ -350,12 +354,14 @@ function createPlayer(key) {
       const P = window.Twitch.Player;
       player.addEventListener(P.READY, () => {
         const m = state.audibleName !== key;
-        try {
-          player.setMuted(m);
-          if (!m && player.getVolume() === 0) player.setVolume(MIN_AUDIBLE_VOLUME);
-        } catch { /* ignore */ }
+        try { player.setMuted(m); } catch { /* ignore */ }
         nativeMuted.set(key, m);
         muteSettleAt.set(key, performance.now() + MUTE_SETTLE_MS);
+        // 音量まわり（バックグラウンド維持など）は再生が始まってから適用する。
+        // 開始直後に触ると自動再生の判定に巻き込まれて止まることがあるため。
+        setTimeout(() => {
+          if (players.get(key) === player) applyMute(key, state.audibleName !== key);
+        }, MUTE_SETTLE_MS);
       });
       player.addEventListener(P.ONLINE, () => setStatus(key, 'live'));
       // PLAYINGは広告の再生開始でも発火する。ここで画質を変えると広告が作り直されて
@@ -387,6 +393,9 @@ function createPlayer(key) {
       setTimeout(() => ytListen(f), 1200);
       setTimeout(() => ytListen(f), 4000);
       muteSettleAt.set(key, performance.now() + MUTE_SETTLE_MS);
+      setTimeout(() => {
+        if (playerFrames.get(key) === f) applyMute(key, state.audibleName !== key);
+      }, MUTE_SETTLE_MS);
     });
   }
   nativeMuted.set(key, muted);
@@ -634,22 +643,107 @@ function flashTile(key) {
 // 音量0のままミュートだけ解除しても無音のままで「ボタンは点いているのに聞こえない」
 // 状態になる。プレーヤー内蔵UIで0まで絞られている場合があるので必ず戻す。
 const MIN_AUDIBLE_VOLUME = 0.5;
+const savedVolume = new Map();  // key -> 無音化する前の音量（可聴に戻すとき復元）
+
+// --- バックグラウンド維持（実験的・既定オフ） -----------------------------
+// Twitchは「再生が止まって再開する」たびにプリロール広告を挿しこむ。これは
+// 配信元の仕組みなので埋め込み側からは消せない。できるのは止めないことだけ。
+//
+// ブラウザは画面が隠れると「無音の動画」を省電力のために一時停止する。この判定は
+// 実効音量（muted なら0、それ以外は volume）が0かどうかで行われるため、
+// 単にミュートを外して音量0にするだけでは止められる（実測でも音量0のままなら
+// 自動再生ブロックが働かない＝ブラウザは無音と見なしている）。
+// 止めさせないためには、聞こえないほど小さくても音量を0より上にする必要がある。
+//
+// 代償として音声フォーカスを取るので、他アプリの音楽が止まることがある。
+// 通信量と電池も使う。効くかどうかも端末とブラウザ次第。既定オフの理由。
+const KEEPALIVE_VOLUME = 0.001; // 約-60dB。実質無音
+// iOSは volume の変更を無視する（＝全部の音が鳴ってしまう）ため対象外。
+// そもそもアプリを離れると全て止まるので効果もない。
+const isIOS = () =>
+  /iP(hone|od|ad)/.test(navigator.platform || '') ||
+  (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
+
+// バックグラウンドが長引いたら通信と電池を無駄にするだけなので、素直に手放す
+const KEEPALIVE_RELEASE_MS = 300000;
+let keepAliveReleased = false;
+let keepAliveReleaseTimer = null;
+let hasUserGesture = false;
+
+// ミュート解除には（自動再生ブロックを避けるため）一度の操作が必要
+const keepAliveActive = () =>
+  state.keepAlive && hasUserGesture && !keepAliveReleased && !isIOS();
+
+function disableKeepAlive(reason) {
+  state.keepAlive = false;
+  saveSession();
+  renderQuality();
+  applyAudioStates();
+  if (reason) toast(reason, 'error', 5000);
+}
+
+// 音量指定が効かない環境では全ての配信から音が出てしまう。反映を実測して、
+// 効いていなければミュートへ戻す。
+const silentKeys = new Set();
+let verifyTimer = null;
+
+function verifyKeepAlive() {
+  if (!keepAliveActive()) return;
+  for (const key of silentKeys) {
+    const p = players.get(key);
+    if (!p || key === state.audibleName) continue;
+    let v;
+    // 再生していないプレーヤーは設定前の音量を返し続けるので判定に使えない
+    // （音が漏れる心配も無い）
+    try { if (p.isPaused()) continue; v = p.getVolume(); } catch { continue; }
+    if (typeof v === 'number' && v > 0.05) {
+      disableKeepAlive('この端末では音量を絞れないため、バックグラウンド維持をオフにしました');
+      return;
+    }
+  }
+}
 
 function applyMute(key, muted) {
   const { platform } = parseEntry(key);
+  // muted かつ維持モードのときは「聞こえない音量で再生を続ける」
+  const silent = muted && keepAliveActive() && platform !== 'kick';
+  const wasSilent = silentKeys.has(key);
+  if (silent) silentKeys.add(key); else silentKeys.delete(key);
+
   if (platform === 'tw') {
     const p = players.get(key);
     if (p) {
       try {
-        p.setMuted(muted);
-        if (!muted && p.getVolume() === 0) p.setVolume(MIN_AUDIBLE_VOLUME);
+        // 維持中の極小音量を「元の音量」として覚えてしまわないよう除外する
+        const cur = p.getVolume();
+        if (!wasSilent && cur > 0) savedVolume.set(key, cur);
+        const restore = savedVolume.get(key) || MIN_AUDIBLE_VOLUME;
+        if (silent) {
+          p.setVolume(KEEPALIVE_VOLUME);
+          p.setMuted(false);
+        } else if (muted) {
+          p.setMuted(true);
+          if (wasSilent) p.setVolume(restore);
+        } else {
+          p.setMuted(false);
+          // 読み値の反映が遅れるので、維持状態から戻すときは無条件に復元する
+          if (wasSilent || cur === 0) p.setVolume(restore);
+        }
       } catch { /* ignore */ }
     }
   } else if (platform === 'yt') {
     const f = playerFrames.get(key);
     if (f && f.contentWindow) {
-      ytPost(f, muted ? 'mute' : 'unMute');
-      if (!muted && ytVolume.get(key) === 0) ytPost(f, 'setVolume', [MIN_AUDIBLE_VOLUME * 100]);
+      const cur = ytVolume.get(key);
+      if (!wasSilent && cur > 0) savedVolume.set(key, cur);
+      const restore = savedVolume.get(key) || MIN_AUDIBLE_VOLUME * 100;
+      if (silent) {
+        ytPost(f, 'setVolume', [KEEPALIVE_VOLUME * 100]);
+        ytPost(f, 'unMute');
+      } else {
+        ytPost(f, muted ? 'mute' : 'unMute');
+        if (wasSilent || cur === 0) ytPost(f, 'setVolume', [restore]);
+      }
     }
   } else if (platform === 'kick') {
     // Kickは実行時の音声APIが無いため、ミュート状態が変わったらパラメータを変えて再読込
@@ -662,12 +756,29 @@ function applyMute(key, muted) {
   nativeMuted.set(key, muted);
 }
 
+function applyAudioStates() {
+  muteWriteAt = performance.now();
+  for (const k of state.channels) applyMute(k, k !== state.audibleName);
+  // 反映を待ってから検証する（プレーヤーのAPIは非同期に反映される）
+  clearTimeout(verifyTimer);
+  verifyTimer = setTimeout(verifyKeepAlive, 2000);
+}
+
 function setAudible(key) {
   state.audibleName = key;
-  muteWriteAt = performance.now();
-  for (const k of state.channels) applyMute(k, k !== key);
+  applyAudioStates();
   updateAudibleUI();
   saveSession();
+}
+
+function setKeepAlive(on) {
+  state.keepAlive = on;
+  keepAliveReleased = false;
+  clearTimeout(keepAliveReleaseTimer);
+  renderQuality();
+  applyAudioStates();
+  saveSession();
+  toast(on ? 'バックグラウンドでも再生を維持します' : 'バックグラウンドでは再生を止めます', 'accent');
 }
 
 function updateAudibleUI() {
@@ -864,6 +975,12 @@ function setQuality(id) {
 }
 
 function renderQuality() {
+  const unavailable = isIOS();
+  keepAliveItem.classList.toggle('active', state.keepAlive && !unavailable);
+  keepAliveItem.setAttribute('aria-checked', String(state.keepAlive && !unavailable));
+  keepAliveItem.disabled = unavailable;
+  keepAliveNa.hidden = !unavailable;
+
   qualityList.innerHTML = '';
   for (const opt of QUALITY_OPTIONS) {
     const b = document.createElement('button');
@@ -1236,6 +1353,8 @@ function _remove(key) {
   ytVolume.delete(key);
   ytPaused.delete(key);
   muteSettleAt.delete(key);
+  savedVolume.delete(key);
+  silentKeys.delete(key);
   touchThrough.delete(key);
   clearTimeout(touchThroughTimers.get(key));
   touchThroughTimers.delete(key);
@@ -1527,15 +1646,30 @@ function notePausedOnHide() {
   for (const [key, paused] of ytPaused) if (paused) pausedOnHide.add(key);
 }
 
+// 再開が重なるとN本ぶんの広告と配信が同時に読み込まれ、回線を取り合って
+// どれも進まなくなる。見たい枠から順に、少しずつずらして再開する。
+const RESUME_STAGGER_MS = 1200;
+const resumeTimers = new Set();
+
+function resumeOne(key) {
+  if (!state.channels.includes(key)) return;
+  const p = players.get(key);
+  if (p) { try { if (p.isPaused()) p.play(); } catch { /* ignore */ } return; }
+  const f = playerFrames.get(key);
+  if (f && parseEntry(key).platform === 'yt') ytPost(f, 'playVideo');
+}
+
 function resumePlayers() {
-  for (const [key, p] of players) {
-    if (pausedOnHide.has(key)) continue;
-    try { if (p.isPaused()) p.play(); } catch { /* ignore */ }
-  }
-  for (const [key, f] of playerFrames) {
-    if (parseEntry(key).platform !== 'yt' || pausedOnHide.has(key)) continue;
-    ytPost(f, 'playVideo');
-  }
+  for (const t of resumeTimers) clearTimeout(t);
+  resumeTimers.clear();
+  // 音声を聞いている枠 → フォーカス中の枠 → その他 の順
+  const order = [...new Set([state.audibleName, effectiveFocus(), ...state.channels])]
+    .filter((k) => k && state.channels.includes(k) && !pausedOnHide.has(k));
+  order.forEach((key, i) => {
+    if (i === 0) { resumeOne(key); return; }
+    const t = setTimeout(() => { resumeTimers.delete(t); resumeOne(key); }, i * RESUME_STAGGER_MS);
+    resumeTimers.add(t);
+  });
 }
 
 // 3) 音声ソロの復元。読み込み直後に音を出そうとすると自動再生がブロックされ、
@@ -1561,8 +1695,19 @@ function wireLifecycle() {
       // モバイルではタブ破棄前にこれしか来ないことがあるので必ず保存する
       saveSession();
       notePausedOnHide();
+      // 長時間離れたままなら維持をやめる（無音の再生を続ける意味がなく、
+      // 通信量と電池だけを消費するため）
+      clearTimeout(keepAliveReleaseTimer);
+      keepAliveReleaseTimer = setTimeout(() => {
+        keepAliveReleased = true;
+        applyAudioStates();
+      }, KEEPALIVE_RELEASE_MS);
       return;
     }
+    clearTimeout(keepAliveReleaseTimer);
+    const wasReleased = keepAliveReleased;
+    keepAliveReleased = false;
+    if (wasReleased) applyAudioStates();
     updateWakeLock();
     resumePlayers();
     // 復帰直後の誤タップで配信サイトへ飛ばないよう、直接操作は解除しておく
@@ -1571,7 +1716,11 @@ function wireLifecycle() {
   window.addEventListener('pagehide', saveSession);
 
   const onFirstGesture = () => {
+    if (hasUserGesture) return;
+    hasUserGesture = true;
+    // 自動再生ブロックを避けるためここまで保留していた音声関連をまとめて適用する
     if (pendingAudible) applyPendingAudible();
+    else applyAudioStates();
     updateWakeLock();
   };
   document.addEventListener('pointerdown', onFirstGesture, { once: true });
@@ -1642,6 +1791,7 @@ function wireToolbar() {
   });
 
   btn.quality.addEventListener('click', () => toggleQualityPop());
+  keepAliveItem.addEventListener('click', () => setKeepAlive(!state.keepAlive));
   btn.presets.addEventListener('click', () => togglePresetsPop());
   btn.presetSave.addEventListener('click', () => {
     if (!state.channels.length) { toast('保存する配信がありません', 'error'); return; }
@@ -1754,6 +1904,7 @@ function init() {
     if (typeof sess.chatWidth === 'number') state.chatWidth = clamp(sess.chatWidth, 280, 520);
     if (typeof sess.focusName === 'string') state.focusName = normalizeKey(sess.focusName);
     if (QUALITY_OPTIONS.some((o) => o.id === sess.quality)) state.quality = sess.quality;
+    if (typeof sess.keepAlive === 'boolean') state.keepAlive = sess.keepAlive;
   }
   renderQuality();
   chatPanel.style.width = state.chatWidth + 'px';
