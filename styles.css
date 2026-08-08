@@ -579,10 +579,8 @@ body.resizing { user-select: none; }
   .tile-head .b-chat, .tile-head .b-pop { display: none; }
 }
 
-/* 再生/一時停止は狭い枠では落とす。スマホでは一時停止＝再開時に広告なので、
-   むしろ押せないほうが安全（音を止めるだけならスピーカーボタンで足りる）。 */
 @container (max-width: 290px) {
-  .tile-head .b-focus, .tile-head .b-play { display: none; }
+  .tile-head .b-focus { display: none; }
 }
 
 @container (max-width: 240px) {
@@ -713,24 +711,23 @@ body.compact.touch .tile.touch-through .tile-head {
 /* 映像そのものがリンクになっていて、軽く触れる/クリックするだけで配信サイトへ
    遷移してしまう。透明なシールドで覆って操作を受け止め、こちらのUIだけに
    届くようにする（プレーヤー内蔵のミュートボタンとの二重操作も同時に防げる）。
-   PCでは常時有効。タッチ端末だけ「直接操作」ボタン (.b-touch) で一時的に外せる
-   （スマホはプレーヤー内蔵の画質・全画面に触る手段が他に無いため）。 */
+
+   ただし覆うのは「再生中」のあいだだけ (.playing)。まだ始まっていない・止まって
+   いるときまで覆うと、自動再生が効かない環境でプレーヤー内蔵の再生ボタンを
+   押せず、配信を始める手段が無くなるため。
+   タッチ端末では「直接操作」ボタン (.b-touch) で一時的に外すこともできる。 */
 .tap-shield {
   position: absolute;
   inset: 0;
   z-index: 4;
+  display: none;
   -webkit-tap-highlight-color: transparent;
 }
 
-.tile.touch-through .tap-shield { display: none; }
+.tile.playing:not(.touch-through) .tap-shield { display: block; }
 
 .b-touch { display: none; }
 body.touch .b-touch { display: inline-flex; }
-
-/* 再生/一時停止はPCでは出さない。Twitchの埋め込みプレーヤーがライブ配信では
-   pause()/play() を受け付けず、押しても何も起きないため。 */
-.b-play { display: none; }
-body.touch .b-play { display: inline-flex; }
 
 /* 直接操作を許可中の枠は「触ると配信サイトへ飛ぶ状態」なので分かるようにする。
    内側(inset)だと映像のiframeに隠れてしまうため外側に出す。 */

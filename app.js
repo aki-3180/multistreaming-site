@@ -37,8 +37,6 @@ const $ = (sel, el = document) => el.querySelector(sel);
 const ICONS = {
   grip: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
   volOff: '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4zM23 9l-6 6M17 9l6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  play: '<svg viewBox="0 0 24 24"><path d="M7.5 4.8v14.4L19.5 12z" fill="currentColor"/></svg>',
-  pause: '<svg viewBox="0 0 24 24"><rect x="6.5" y="5" width="3.9" height="14" rx="1.2" fill="currentColor"/><rect x="13.6" y="5" width="3.9" height="14" rx="1.2" fill="currentColor"/></svg>',
   volOn: '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   chat: '<svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
   maximize: '<svg viewBox="0 0 24 24"><path d="M15 3h6v6M21 3l-7 7M9 21H3v-6M3 21l7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -375,17 +373,20 @@ function createPlayer(key) {
       });
       player.addEventListener(P.ONLINE, () => setStatus(key, 'live'));
       player.addEventListener(P.PAUSE, () => {
-        setPlayPaused(key, true);
+        setPlaying(key, false);
         notePlayerPaused(key);
       });
-      player.addEventListener(P.PLAY, () => setPlayPaused(key, false));
+      player.addEventListener(P.ENDED, () => setPlaying(key, false));
       // PLAYINGは広告の再生開始でも発火する。ここで画質を変えると広告が作り直されて
       // 先に進まなくなるため、画質の適用はここでは行わない。
       player.addEventListener(P.PLAYING, () => {
         setStatus(key, 'live');
-        setPlayPaused(key, false);
+        setPlaying(key, true);
       });
-      player.addEventListener(P.OFFLINE, () => setStatus(key, 'offline'));
+      player.addEventListener(P.OFFLINE, () => {
+        setStatus(key, 'offline');
+        setPlaying(key, false);
+      });
       scheduleInitialQuality(key);
     }, () => {
       const el = tileEls.get(key);
@@ -457,7 +458,7 @@ function reloadPlayer(key) {
   ytVolume.delete(key);
   ytPaused.delete(key);
   muteSettleAt.delete(key);
-  setPlayPaused(key, false); // 作り直したプレーヤーは再生から始まる
+  setPlaying(key, false); // 再生が始まるまではシールドを外しておく
   const host = document.createElement('div');
   host.className = 'player-host';
   host.id = domId(key);
@@ -480,7 +481,6 @@ function createTile(key) {
       <span class="badge loading">読込中</span>
       <span class="spacer"></span>
       <button class="t-btn b-audio" title="この配信の音声を聞く">${ICONS.volOff}</button>
-      <button class="t-btn b-play" title="一時停止">${ICONS.pause}</button>
       <button class="t-btn b-touch" title="プレーヤーを直接操作する">${ICONS.lock}</button>
       <button class="t-btn b-chat" title="この配信のチャットを表示">${ICONS.chat}</button>
       <button class="t-btn b-focus" title="拡大表示（フォーカス）">${ICONS.maximize}</button>
@@ -498,8 +498,8 @@ function createTile(key) {
     </div>`;
   $('.tile-name', el).textContent = displayName(key);
   if (platform !== 'tw') $('.badge', el).style.display = 'none';
-  // Kickのプレーヤーには再生制御のAPIが無い
-  if (platform === 'kick') $('.b-play', el).style.display = 'none';
+  // 再生状態を通知してこないKickは、常に再生中とみなしてシールドを掛ける
+  if (platform === 'kick') el.classList.add('playing');
 
   // --- ボタン類
   $('.b-audio', el).addEventListener('click', () =>
@@ -515,7 +515,6 @@ function createTile(key) {
   $('.b-close', el).addEventListener('click', () => removeChannel(key));
   $('.cover-reload', el).addEventListener('click', () => reloadPlayer(key));
   $('.b-touch', el).addEventListener('click', () => setTouchThrough(key, !touchThrough.has(key)));
-  $('.b-play', el).addEventListener('click', () => togglePlay(key));
 
   // --- タッチ端末: 映像を触っただけで配信サイトへ飛ばされるのを防ぐ
   $('.tap-shield', el).addEventListener('pointerdown', () => revealHead(key));
@@ -689,45 +688,21 @@ function flashTile(key) {
   setTimeout(() => el.classList.remove('drop-target'), 800);
 }
 
-// ---------------------------------------------------------------- 再生 / 一時停止
-// プレーヤー内蔵のボタンはシールドで塞いでいるので、こちら側に用意する。
-// Kickは実行時APIが無いため対象外（ボタン自体を出さない）。
+// ---------------------------------------------------------------- 再生状態
+// 再生/一時停止の操作はこちらからは出さない。Twitchの埋め込みプレーヤーは
+// ライブ配信で pause()/play() を受け付けず、押しても何も起きないため。
 //
-// 状態は「プレーヤーが通知してきたイベント」だけを根拠にする。
-// Twitchの isPaused() は問い合わせのたびに正しい値が返るとは限らず、
-// これを条件にすると実際は再生中なのに play() を送り続ける（＝押しても
-// 何も起きない）状態で固まる。イベント＋押した直後の楽観更新なら、
-// たとえ通知が来なくても次の一押しで必ず逆の操作になり、詰まらない。
-const playPaused = new Map();  // key -> 一時停止中か（未設定 = 再生中とみなす）
+// 代わりに再生中かどうかだけを追い、映像を覆うシールドの有効/無効に使う。
+// 再生が始まっていない・止まっているときまで覆ってしまうと、自動再生が効かない
+// 環境ではプレーヤー内蔵の再生ボタンを押せず、配信を始める手段が無くなる。
+// 「再生中だけ覆う」なら、始めるときは触れて、始まったら誤操作を防げる。
+const playingKeys = new Set();
 
-const isPlayerPaused = (key) => playPaused.get(key) === true;
-
-function setPlayPaused(key, paused) {
-  if (playPaused.get(key) === paused) return;
-  playPaused.set(key, paused);
+function setPlaying(key, on) {
+  if (on === playingKeys.has(key)) return;
+  if (on) playingKeys.add(key); else playingKeys.delete(key);
   const el = tileEls.get(key);
-  if (!el) return;
-  const b = $('.b-play', el);
-  b.innerHTML = paused ? ICONS.play : ICONS.pause;
-  b.title = paused ? '再生' : '一時停止';
-  b.classList.toggle('on', paused);
-}
-
-function togglePlay(key) {
-  const { platform } = parseEntry(key);
-  const paused = isPlayerPaused(key);
-  if (platform === 'tw') {
-    const p = players.get(key);
-    if (!p) return;
-    try { if (paused) p.play(); else p.pause(); } catch { /* ignore */ }
-  } else if (platform === 'yt') {
-    const f = playerFrames.get(key);
-    if (!f) return;
-    ytPost(f, paused ? 'playVideo' : 'pauseVideo');
-  } else {
-    return;
-  }
-  setPlayPaused(key, !paused);
+  if (el) el.classList.toggle('playing', on);
 }
 
 // ---------------------------------------------------------------- audio
@@ -941,11 +916,13 @@ function onFrameMessage(e) {
   if (!d || !d.info) return;
   const key = keyOfSource(e.source);
   if (!key) return;
-  // playerState: 1=再生中 2=一時停止（復帰時に勝手に再開させないための判定材料）
+  // playerState: 1=再生中 2=一時停止 3=バッファ中（0=終了）。
+  // ytPaused は復帰時に勝手に再開させないための判定材料。
   if (typeof d.info.playerState === 'number') {
-    const paused = d.info.playerState === 2;
-    ytPaused.set(key, paused);
-    setPlayPaused(key, paused);
+    const st = d.info.playerState;
+    if (st === 1 || st === 2) ytPaused.set(key, st === 2);
+    if (st === 1) setPlaying(key, true);
+    else if (st === 2 || st === 0) setPlaying(key, false);
   }
   if (typeof d.info.volume === 'number') ytVolume.set(key, d.info.volume);
   if (typeof d.info.muted === 'boolean' || typeof d.info.volume === 'number') {
@@ -1469,7 +1446,7 @@ function _remove(key) {
   ytPaused.delete(key);
   muteSettleAt.delete(key);
   silentKeys.delete(key);
-  playPaused.delete(key);
+  playingKeys.delete(key);
   touchThrough.delete(key);
   clearTimeout(touchThroughTimers.get(key));
   touchThroughTimers.delete(key);
