@@ -374,10 +374,17 @@ function createPlayer(key) {
         }, MUTE_SETTLE_MS);
       });
       player.addEventListener(P.ONLINE, () => setStatus(key, 'live'));
-      player.addEventListener(P.PAUSE, () => notePlayerPaused(key));
+      player.addEventListener(P.PAUSE, () => {
+        setPlayPaused(key, true);
+        notePlayerPaused(key);
+      });
+      player.addEventListener(P.PLAY, () => setPlayPaused(key, false));
       // PLAYINGは広告の再生開始でも発火する。ここで画質を変えると広告が作り直されて
       // 先に進まなくなるため、画質の適用はここでは行わない。
-      player.addEventListener(P.PLAYING, () => setStatus(key, 'live'));
+      player.addEventListener(P.PLAYING, () => {
+        setStatus(key, 'live');
+        setPlayPaused(key, false);
+      });
       player.addEventListener(P.OFFLINE, () => setStatus(key, 'offline'));
       scheduleInitialQuality(key);
     }, () => {
@@ -450,6 +457,7 @@ function reloadPlayer(key) {
   ytVolume.delete(key);
   ytPaused.delete(key);
   muteSettleAt.delete(key);
+  setPlayPaused(key, false); // 作り直したプレーヤーは再生から始まる
   const host = document.createElement('div');
   host.className = 'player-host';
   host.id = domId(key);
@@ -684,15 +692,25 @@ function flashTile(key) {
 // ---------------------------------------------------------------- 再生 / 一時停止
 // プレーヤー内蔵のボタンはシールドで塞いでいるので、こちら側に用意する。
 // Kickは実行時APIが無いため対象外（ボタン自体を出さない）。
-function isPlayerPaused(key) {
-  const { platform } = parseEntry(key);
-  if (platform === 'tw') {
-    const p = players.get(key);
-    if (!p) return false;
-    try { return p.isPaused() === true; } catch { return false; }
-  }
-  if (platform === 'yt') return ytPaused.get(key) === true;
-  return false;
+//
+// 状態は「プレーヤーが通知してきたイベント」だけを根拠にする。
+// Twitchの isPaused() は問い合わせのたびに正しい値が返るとは限らず、
+// これを条件にすると実際は再生中なのに play() を送り続ける（＝押しても
+// 何も起きない）状態で固まる。イベント＋押した直後の楽観更新なら、
+// たとえ通知が来なくても次の一押しで必ず逆の操作になり、詰まらない。
+const playPaused = new Map();  // key -> 一時停止中か（未設定 = 再生中とみなす）
+
+const isPlayerPaused = (key) => playPaused.get(key) === true;
+
+function setPlayPaused(key, paused) {
+  if (playPaused.get(key) === paused) return;
+  playPaused.set(key, paused);
+  const el = tileEls.get(key);
+  if (!el) return;
+  const b = $('.b-play', el);
+  b.innerHTML = paused ? ICONS.play : ICONS.pause;
+  b.title = paused ? '再生' : '一時停止';
+  b.classList.toggle('on', paused);
 }
 
 function togglePlay(key) {
@@ -706,33 +724,10 @@ function togglePlay(key) {
     const f = playerFrames.get(key);
     if (!f) return;
     ytPost(f, paused ? 'playVideo' : 'pauseVideo');
-    ytPaused.set(key, !paused); // 通知が来るまでのつなぎ
   } else {
     return;
   }
-  // 押した直後に見た目を合わせる（実状態は下のポーリングで追従する）
-  updatePlayUI(key, !paused);
-}
-
-// ボタンの見た目は実際の再生状態に合わせる。DOMを毎回書き換えないよう差分だけ更新する。
-const playUIState = new Map();
-
-function updatePlayUI(key, paused) {
-  if (playUIState.get(key) === paused) return;
-  playUIState.set(key, paused);
-  const el = tileEls.get(key);
-  if (!el) return;
-  const b = $('.b-play', el);
-  b.innerHTML = paused ? ICONS.play : ICONS.pause;
-  b.title = paused ? '再生' : '一時停止';
-  b.classList.toggle('on', paused);
-}
-
-function pollPlayState() {
-  for (const key of state.channels) {
-    if (parseEntry(key).platform === 'kick') continue;
-    updatePlayUI(key, isPlayerPaused(key));
-  }
+  setPlayPaused(key, !paused);
 }
 
 // ---------------------------------------------------------------- audio
@@ -947,7 +942,11 @@ function onFrameMessage(e) {
   const key = keyOfSource(e.source);
   if (!key) return;
   // playerState: 1=再生中 2=一時停止（復帰時に勝手に再開させないための判定材料）
-  if (typeof d.info.playerState === 'number') ytPaused.set(key, d.info.playerState === 2);
+  if (typeof d.info.playerState === 'number') {
+    const paused = d.info.playerState === 2;
+    ytPaused.set(key, paused);
+    setPlayPaused(key, paused);
+  }
   if (typeof d.info.volume === 'number') ytVolume.set(key, d.info.volume);
   if (typeof d.info.muted === 'boolean' || typeof d.info.volume === 'number') {
     // iOSは音量がハード側の管理でプログラムから動かせないため、音量0を
@@ -990,12 +989,9 @@ function pollNativeMute() {
 
 function startMuteSync() {
   if (muteSyncTimer) return;
-  // TwitchのAPIにはミュート変更イベントが無いため、ごく軽いポーリングで拾う。
-  // 再生/一時停止ボタンの見た目も同じ周期で実状態に合わせる。
-  muteSyncTimer = setInterval(() => {
-    pollNativeMute();
-    pollPlayState();
-  }, MUTE_SYNC_MS);
+  // TwitchのAPIにはミュート変更イベントが無いため、ごく軽いポーリングで拾う
+  // （再生状態のほうはイベントで来るのでポーリングしない）。
+  muteSyncTimer = setInterval(pollNativeMute, MUTE_SYNC_MS);
 }
 
 // ---------------------------------------------------------------- quality
@@ -1473,7 +1469,7 @@ function _remove(key) {
   ytPaused.delete(key);
   muteSettleAt.delete(key);
   silentKeys.delete(key);
-  playUIState.delete(key);
+  playPaused.delete(key);
   touchThrough.delete(key);
   clearTimeout(touchThroughTimers.get(key));
   touchThroughTimers.delete(key);
