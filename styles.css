@@ -727,6 +727,11 @@ body.compact.touch .tile.touch-through .tile-head {
 .b-touch { display: none; }
 body.touch .b-touch { display: inline-flex; }
 
+/* 再生/一時停止はPCでは出さない。Twitchの埋め込みプレーヤーがライブ配信では
+   pause()/play() を受け付けず、押しても何も起きないため。 */
+.b-play { display: none; }
+body.touch .b-play { display: inline-flex; }
+
 /* 直接操作を許可中の枠は「触ると配信サイトへ飛ぶ状態」なので分かるようにする。
    内側(inset)だと映像のiframeに隠れてしまうため外側に出す。 */
 .tile.touch-through {
