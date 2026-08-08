@@ -524,10 +524,13 @@ function createTile(key) {
 // 遷移してしまう。透明なシールドで覆い、操作はこちらのUIだけに届くようにする。
 // （プレーヤー内蔵のミュートボタンが効かなくなるので、こちら側のミュートと
 //   二重になって状態が食い違う問題も同時に解消される）
+// 一時解除できるのはタッチ端末だけ（PCでは .b-touch を出さない）。
+// スマホはプレーヤー内蔵の画質・全画面に触る手段が他に無いので逃げ道を残すが、
+// PCはこちらのUIとキーボードで足りるうえ、解除すると映像のクリックで
+// 配信サイトへ飛んでしまうため用意しない。
 const touchThrough = new Set();
 const touchThroughTimers = new Map();
-// タッチでは指が触れただけで発動するため、開けっぱなしにせず自動で閉じる。
-// マウスは意図しないと押さないので、明示的に戻すまで開けたままにする。
+// 指が触れただけで発動するので、開けっぱなしにせず一定時間で自動的に閉じる
 const TOUCH_THROUGH_MS = 30000;
 let touchThroughHinted = false;
 
@@ -538,15 +541,10 @@ function setTouchThrough(key, on) {
   touchThroughTimers.delete(key);
   if (on) {
     touchThrough.add(key);
-    const auto = isCoarse();
-    if (auto) {
-      touchThroughTimers.set(key, setTimeout(() => setTouchThrough(key, false), TOUCH_THROUGH_MS));
-    }
+    touchThroughTimers.set(key, setTimeout(() => setTouchThrough(key, false), TOUCH_THROUGH_MS));
     if (!touchThroughHinted) {
       touchThroughHinted = true;
-      toast(auto
-        ? 'プレーヤーを直接操作できます（30秒で自動的に戻ります）'
-        : 'プレーヤーを直接操作できます。同じボタンで誤クリック防止に戻せます', 'accent', 4200);
+      toast('プレーヤーを直接操作できます（30秒で自動的に戻ります）', 'accent', 3600);
     }
   } else {
     touchThrough.delete(key);

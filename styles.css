@@ -664,7 +664,8 @@ body.compact.touch .tile.touch-through .tile-head {
 /* 映像そのものがリンクになっていて、軽く触れる/クリックするだけで配信サイトへ
    遷移してしまう。透明なシールドで覆って操作を受け止め、こちらのUIだけに
    届くようにする（プレーヤー内蔵のミュートボタンとの二重操作も同時に防げる）。
-   「直接操作」ボタン (.b-touch) を押した枠だけ一時的にシールドを外す。 */
+   PCでは常時有効。タッチ端末だけ「直接操作」ボタン (.b-touch) で一時的に外せる
+   （スマホはプレーヤー内蔵の画質・全画面に触る手段が他に無いため）。 */
 .tap-shield {
   position: absolute;
   inset: 0;
@@ -673,6 +674,9 @@ body.compact.touch .tile.touch-through .tile-head {
 }
 
 .tile.touch-through .tap-shield { display: none; }
+
+.b-touch { display: none; }
+body.touch .b-touch { display: inline-flex; }
 
 /* 直接操作を許可中の枠は「触ると配信サイトへ飛ぶ状態」なので分かるようにする。
    内側(inset)だと映像のiframeに隠れてしまうため外側に出す。 */
