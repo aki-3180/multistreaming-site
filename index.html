@@ -62,6 +62,9 @@
         <svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4zM23 9l-6 6M17 9l6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
 
+      <input id="vol" type="range" min="0" max="100" step="1" value="50"
+             title="音量（音声ONの配信に適用されます）" aria-label="音量">
+
       <button id="quality-btn" class="icon-btn" title="画質・軽量化 (Q)" aria-haspopup="true">
         <svg viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 1 9-9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 12l5-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
@@ -233,9 +236,20 @@
       チャットだけなら右上の「別窓で開く」でも同じです。
     </p>
 
-    <h3>音声について</h3>
+    <h3>音声・再生の操作</h3>
     <p>
       追加直後は全配信ミュートです。各配信のスピーカーボタン（または数字キー 1〜9）で「その配信だけ音声ON」に切り替わります。
+    </p>
+    <ul>
+      <li><b>音量</b> — ツールバーのスピーカーの隣のスライダーで調整します。鳴るのは常に1配信なので、音量もアプリ全体で1つです（iPhone・iPadでは音量をプログラムから変えられないため表示されません。端末の音量ボタンを使ってください）</li>
+      <li><b>再生 / 一時停止</b> — 各配信のバーの ▶ / ⏸ ボタンです（Kickは対応するAPIが無いため非表示）</li>
+    </ul>
+    <p class="note">
+      映像はシールドで覆っているため、プレーヤー内蔵のボタンは押せません。誤って配信サイトへ飛ぶのを防ぐためです。
+      上記のボタンで代替できるようにしています（スマホのみ、バーの鍵ボタンで一時的に内蔵UIを触れます）。
+    </p>
+    <p class="note">
+      <b>スマホでは一時停止に注意してください。</b>再開時にTwitchの広告が入ります。音を止めたいだけならスピーカーボタン（ミュート）を使ってください。
     </p>
 
     <h3>スマホでの視聴（横画面推奨）</h3>

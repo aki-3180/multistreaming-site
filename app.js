@@ -37,6 +37,8 @@ const $ = (sel, el = document) => el.querySelector(sel);
 const ICONS = {
   grip: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
   volOff: '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4zM23 9l-6 6M17 9l6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  play: '<svg viewBox="0 0 24 24"><path d="M7.5 4.8v14.4L19.5 12z" fill="currentColor"/></svg>',
+  pause: '<svg viewBox="0 0 24 24"><rect x="6.5" y="5" width="3.9" height="14" rx="1.2" fill="currentColor"/><rect x="13.6" y="5" width="3.9" height="14" rx="1.2" fill="currentColor"/></svg>',
   volOn: '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   chat: '<svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
   maximize: '<svg viewBox="0 0 24 24"><path d="M15 3h6v6M21 3l-7 7M9 21H3v-6M3 21l7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -74,6 +76,7 @@ const qualityPop = $('#quality-pop');
 const qualityList = $('#quality-list');
 const keepAliveItem = $('#keepalive-item');
 const keepAliveNa = $('#keepalive-na');
+const volInput = $('#vol');
 const btn = {
   layoutGrid: $('#layout-grid-btn'),
   layoutFocus: $('#layout-focus-btn'),
@@ -101,6 +104,7 @@ const state = {
   activeChat: null,
   chatWidth: 340,
   quality: 'auto',
+  volume: 0.5,         // 鳴るのは常に1配信なので音量もアプリ全体で1つ
   keepAlive: false,    // バックグラウンドでも再生を止めない（実験的・keepAliveActive 参照）
 };
 
@@ -267,6 +271,7 @@ function saveSession() {
     activeChat: state.activeChat,
     chatWidth: state.chatWidth,
     quality: state.quality,
+    volume: state.volume,
     keepAlive: state.keepAlive,
   });
 }
@@ -467,6 +472,7 @@ function createTile(key) {
       <span class="badge loading">読込中</span>
       <span class="spacer"></span>
       <button class="t-btn b-audio" title="この配信の音声を聞く">${ICONS.volOff}</button>
+      <button class="t-btn b-play" title="一時停止">${ICONS.pause}</button>
       <button class="t-btn b-touch" title="プレーヤーを直接操作する">${ICONS.lock}</button>
       <button class="t-btn b-chat" title="この配信のチャットを表示">${ICONS.chat}</button>
       <button class="t-btn b-focus" title="拡大表示（フォーカス）">${ICONS.maximize}</button>
@@ -484,6 +490,8 @@ function createTile(key) {
     </div>`;
   $('.tile-name', el).textContent = displayName(key);
   if (platform !== 'tw') $('.badge', el).style.display = 'none';
+  // Kickのプレーヤーには再生制御のAPIが無い
+  if (platform === 'kick') $('.b-play', el).style.display = 'none';
 
   // --- ボタン類
   $('.b-audio', el).addEventListener('click', () =>
@@ -499,6 +507,7 @@ function createTile(key) {
   $('.b-close', el).addEventListener('click', () => removeChannel(key));
   $('.cover-reload', el).addEventListener('click', () => reloadPlayer(key));
   $('.b-touch', el).addEventListener('click', () => setTouchThrough(key, !touchThrough.has(key)));
+  $('.b-play', el).addEventListener('click', () => togglePlay(key));
 
   // --- タッチ端末: 映像を触っただけで配信サイトへ飛ばされるのを防ぐ
   $('.tap-shield', el).addEventListener('pointerdown', () => revealHead(key));
@@ -672,11 +681,83 @@ function flashTile(key) {
   setTimeout(() => el.classList.remove('drop-target'), 800);
 }
 
+// ---------------------------------------------------------------- 再生 / 一時停止
+// プレーヤー内蔵のボタンはシールドで塞いでいるので、こちら側に用意する。
+// Kickは実行時APIが無いため対象外（ボタン自体を出さない）。
+function isPlayerPaused(key) {
+  const { platform } = parseEntry(key);
+  if (platform === 'tw') {
+    const p = players.get(key);
+    if (!p) return false;
+    try { return p.isPaused() === true; } catch { return false; }
+  }
+  if (platform === 'yt') return ytPaused.get(key) === true;
+  return false;
+}
+
+function togglePlay(key) {
+  const { platform } = parseEntry(key);
+  const paused = isPlayerPaused(key);
+  if (platform === 'tw') {
+    const p = players.get(key);
+    if (!p) return;
+    try { if (paused) p.play(); else p.pause(); } catch { /* ignore */ }
+  } else if (platform === 'yt') {
+    const f = playerFrames.get(key);
+    if (!f) return;
+    ytPost(f, paused ? 'playVideo' : 'pauseVideo');
+    ytPaused.set(key, !paused); // 通知が来るまでのつなぎ
+  } else {
+    return;
+  }
+  // 押した直後に見た目を合わせる（実状態は下のポーリングで追従する）
+  updatePlayUI(key, !paused);
+}
+
+// ボタンの見た目は実際の再生状態に合わせる。DOMを毎回書き換えないよう差分だけ更新する。
+const playUIState = new Map();
+
+function updatePlayUI(key, paused) {
+  if (playUIState.get(key) === paused) return;
+  playUIState.set(key, paused);
+  const el = tileEls.get(key);
+  if (!el) return;
+  const b = $('.b-play', el);
+  b.innerHTML = paused ? ICONS.play : ICONS.pause;
+  b.title = paused ? '再生' : '一時停止';
+  b.classList.toggle('on', paused);
+}
+
+function pollPlayState() {
+  for (const key of state.channels) {
+    if (parseEntry(key).platform === 'kick') continue;
+    updatePlayUI(key, isPlayerPaused(key));
+  }
+}
+
 // ---------------------------------------------------------------- audio
-// 音量0のままミュートだけ解除しても無音のままで「ボタンは点いているのに聞こえない」
-// 状態になる。プレーヤー内蔵UIで0まで絞られている場合があるので必ず戻す。
-const MIN_AUDIBLE_VOLUME = 0.5;
-const savedVolume = new Map();  // key -> 無音化する前の音量（可聴に戻すとき復元）
+// 音声が鳴るのは常に1配信だけなので、音量もアプリ全体で1つ持つ。
+// ツールバーのスライダーがこの値を動かし、音声ONの配信に適用する。
+function applyVolume() {
+  const key = state.audibleName;
+  if (!key) return;
+  const { platform } = parseEntry(key);
+  if (platform === 'tw') {
+    const p = players.get(key);
+    if (p) { try { p.setVolume(state.volume); } catch { /* ignore */ } }
+  } else if (platform === 'yt') {
+    ytPost(playerFrames.get(key), 'setVolume', [Math.round(state.volume * 100)]);
+  }
+  // Kickには音量APIが無い（プレーヤー内の操作が必要）
+}
+
+function setVolume(v, fromInput = false) {
+  state.volume = clamp(v, 0, 1);
+  muteWriteAt = performance.now(); // 直後の読み値でミュート判定を揺らさない
+  applyVolume();
+  if (!fromInput) volInput.value = String(Math.round(state.volume * 100));
+  saveSession();
+}
 
 // --- バックグラウンド維持（実験的・既定オフ） -----------------------------
 // Twitchは「再生が止まって再開する」たびにプリロール広告を挿しこむ。これは
@@ -747,35 +828,28 @@ function applyMute(key, muted) {
     const p = players.get(key);
     if (p) {
       try {
-        // 維持中の極小音量を「元の音量」として覚えてしまわないよう除外する
-        const cur = p.getVolume();
-        if (!wasSilent && cur > 0) savedVolume.set(key, cur);
-        const restore = savedVolume.get(key) || MIN_AUDIBLE_VOLUME;
         if (silent) {
           p.setVolume(KEEPALIVE_VOLUME);
           p.setMuted(false);
         } else if (muted) {
           p.setMuted(true);
-          if (wasSilent) p.setVolume(restore);
+          // 維持用の極小音量を残さない（次に聞くときスライダーと食い違うため）
+          if (wasSilent) p.setVolume(state.volume);
         } else {
           p.setMuted(false);
-          // 読み値の反映が遅れるので、維持状態から戻すときは無条件に復元する
-          if (wasSilent || cur === 0) p.setVolume(restore);
+          p.setVolume(state.volume);
         }
       } catch { /* ignore */ }
     }
   } else if (platform === 'yt') {
     const f = playerFrames.get(key);
     if (f && f.contentWindow) {
-      const cur = ytVolume.get(key);
-      if (!wasSilent && cur > 0) savedVolume.set(key, cur);
-      const restore = savedVolume.get(key) || MIN_AUDIBLE_VOLUME * 100;
       if (silent) {
         ytPost(f, 'setVolume', [KEEPALIVE_VOLUME * 100]);
         ytPost(f, 'unMute');
       } else {
         ytPost(f, muted ? 'mute' : 'unMute');
-        if (wasSilent || cur === 0) ytPost(f, 'setVolume', [restore]);
+        if (wasSilent || !muted) ytPost(f, 'setVolume', [Math.round(state.volume * 100)]);
       }
     }
   } else if (platform === 'kick') {
@@ -879,7 +953,7 @@ function onFrameMessage(e) {
     // iOSは音量がハード側の管理でプログラムから動かせないため、音量0を
     // ミュート扱いにする判定は成立しない（pollNativeMute と同じ理由）
     const vol = ytVolume.get(key);
-    const muted = d.info.muted === true || (!isIOS() && vol === 0);
+    const muted = d.info.muted === true || (!isIOS() && state.volume > 0 && vol === 0);
     nativeMuted.set(key, muted);
     reconcileMute(key, muted);
   }
@@ -903,7 +977,8 @@ function pollNativeMute() {
   // iOSは音量をプログラムから変えられず（ハード音量のみ）、スライダーも無い。
   // 「音量0まで絞られた＝実質ミュート」という判定はそもそも成立しないので使わない。
   // 読み値が0を返す実装に当たると、音声ONの枠を勝手に落としてしまうため。
-  const useVolume = !isIOS();
+  // スライダーを自分で0にしている場合は、音量0を「内蔵UIで絞られた」と誤認しない
+  const useVolume = !isIOS() && state.volume > 0;
   for (const [key, p] of players) {
     let muted;
     try { muted = p.getMuted() === true || (useVolume && p.getVolume() === 0); } catch { continue; }
@@ -915,8 +990,12 @@ function pollNativeMute() {
 
 function startMuteSync() {
   if (muteSyncTimer) return;
-  // TwitchのAPIにはミュート変更イベントが無いため、ごく軽いポーリングで拾う
-  muteSyncTimer = setInterval(pollNativeMute, MUTE_SYNC_MS);
+  // TwitchのAPIにはミュート変更イベントが無いため、ごく軽いポーリングで拾う。
+  // 再生/一時停止ボタンの見た目も同じ周期で実状態に合わせる。
+  muteSyncTimer = setInterval(() => {
+    pollNativeMute();
+    pollPlayState();
+  }, MUTE_SYNC_MS);
 }
 
 // ---------------------------------------------------------------- quality
@@ -1299,6 +1378,8 @@ function relayout(animate = false) {
   document.body.classList.toggle('compact', compact);
   // タッチ端末向けの挙動（タップシールド・ヘッダー自動非表示）はCSS側で分岐する
   document.body.classList.toggle('touch', isCoarse());
+  // iOSは音量がハード側の管理で setVolume が無視されるため、スライダーを出さない
+  document.body.classList.toggle('no-volume-api', isIOS());
   // ヘッダーの扱いは compact 状態で変わるので、クラス適用後に測る
   measureHeadH();
   if (!compact) document.body.classList.remove('tb-open');
@@ -1391,8 +1472,8 @@ function _remove(key) {
   ytVolume.delete(key);
   ytPaused.delete(key);
   muteSettleAt.delete(key);
-  savedVolume.delete(key);
   silentKeys.delete(key);
+  playUIState.delete(key);
   touchThrough.delete(key);
   clearTimeout(touchThroughTimers.get(key));
   touchThroughTimers.delete(key);
@@ -1897,6 +1978,7 @@ function wireToolbar() {
   btn.layoutGrid.addEventListener('click', () => setLayout('grid'));
   btn.layoutFocus.addEventListener('click', () => setLayout('focus'));
   btn.mute.addEventListener('click', () => setAudible(null));
+  volInput.addEventListener('input', () => setVolume(Number(volInput.value) / 100, true));
   btn.share.addEventListener('click', shareUrl);
   btn.chat.addEventListener('click', () => toggleChat());
   btn.chatClose.addEventListener('click', () => toggleChat(false));
@@ -2043,8 +2125,10 @@ function init() {
     if (typeof sess.chatWidth === 'number') state.chatWidth = clamp(sess.chatWidth, 280, 520);
     if (typeof sess.focusName === 'string') state.focusName = normalizeKey(sess.focusName);
     if (QUALITY_OPTIONS.some((o) => o.id === sess.quality)) state.quality = sess.quality;
+    if (typeof sess.volume === 'number') state.volume = clamp(sess.volume, 0, 1);
     if (typeof sess.keepAlive === 'boolean') state.keepAlive = sess.keepAlive;
   }
+  volInput.value = String(Math.round(state.volume * 100));
   renderQuality();
   renderCookieEnv();
   chatPanel.style.width = state.chatWidth + 'px';

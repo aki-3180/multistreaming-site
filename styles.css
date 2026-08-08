@@ -219,6 +219,53 @@ input::placeholder { color: var(--text-dim); opacity: 0.75; }
 
 #mute-btn.audible { color: var(--accent-hover); }
 
+/* 音量。鳴るのは常に1配信なので、ツールバーに1つだけ置く */
+#vol {
+  flex: 0 0 auto;
+  width: 84px;
+  height: 20px;
+  padding: 0;
+  margin: 0 2px;
+  background: none;
+  border: none;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+#vol::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--elev3);
+}
+
+#vol::-moz-range-track { height: 4px; border-radius: 2px; background: var(--elev3); }
+
+#vol::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: background 0.15s;
+}
+
+#vol::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: none;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+#vol:hover::-webkit-slider-thumb, #vol:focus-visible::-webkit-slider-thumb { background: var(--accent-hover); }
+#vol:hover::-moz-range-thumb { background: var(--accent-hover); }
+
+/* iOSは音量をプログラムから変えられないので、動かないスライダーは出さない */
+body.no-volume-api #vol { display: none; }
+
 /* presets popover */
 .pop {
   position: absolute;
@@ -532,8 +579,10 @@ body.resizing { user-select: none; }
   .tile-head .b-chat, .tile-head .b-pop { display: none; }
 }
 
+/* 再生/一時停止は狭い枠では落とす。スマホでは一時停止＝再開時に広告なので、
+   むしろ押せないほうが安全（音を止めるだけならスピーカーボタンで足りる）。 */
 @container (max-width: 290px) {
-  .tile-head .b-focus { display: none; }
+  .tile-head .b-focus, .tile-head .b-play { display: none; }
 }
 
 @container (max-width: 240px) {
@@ -866,7 +915,8 @@ kbd {
   .logo-text { display: none; }
   #add-input { font-size: 16px; } /* iOS zoom prevention */
   .seg { display: none; }
-  #share-btn, #presets-btn { display: none; }
+  /* スマホは端末側の音量ボタンがあるので場所を空ける */
+  #share-btn, #presets-btn, #vol { display: none; }
   .tile { border-radius: 8px; }
 }
 
