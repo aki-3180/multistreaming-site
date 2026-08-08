@@ -873,8 +873,10 @@ function onFrameMessage(e) {
   if (typeof d.info.playerState === 'number') ytPaused.set(key, d.info.playerState === 2);
   if (typeof d.info.volume === 'number') ytVolume.set(key, d.info.volume);
   if (typeof d.info.muted === 'boolean' || typeof d.info.volume === 'number') {
+    // iOSは音量がハード側の管理でプログラムから動かせないため、音量0を
+    // ミュート扱いにする判定は成立しない（pollNativeMute と同じ理由）
     const vol = ytVolume.get(key);
-    const muted = d.info.muted === true || vol === 0;
+    const muted = d.info.muted === true || (!isIOS() && vol === 0);
     nativeMuted.set(key, muted);
     reconcileMute(key, muted);
   }
@@ -895,9 +897,13 @@ function reconcileMute(key, muted) {
 function pollNativeMute() {
   if (document.hidden) return;
   if (performance.now() - muteWriteAt < MUTE_WRITE_GRACE_MS) return;
+  // iOSは音量をプログラムから変えられず（ハード音量のみ）、スライダーも無い。
+  // 「音量0まで絞られた＝実質ミュート」という判定はそもそも成立しないので使わない。
+  // 読み値が0を返す実装に当たると、音声ONの枠を勝手に落としてしまうため。
+  const useVolume = !isIOS();
   for (const [key, p] of players) {
     let muted;
-    try { muted = p.getMuted() === true || p.getVolume() === 0; } catch { continue; }
+    try { muted = p.getMuted() === true || (useVolume && p.getVolume() === 0); } catch { continue; }
     if (nativeMuted.get(key) === muted) continue;
     nativeMuted.set(key, muted);
     reconcileMute(key, muted);
@@ -1605,10 +1611,12 @@ const COOKIE_GUIDE = {
   },
   'safari-ios': {
     title: 'Safari（iPhone / iPad）',
-    state: 'サードパーティCookieは既定で強くブロックされます。設定を変えても埋め込みには通らないことが多く、iOSではこの方法は期待しないでください。',
+    state: 'iOSはサードパーティのCookieと保存領域を既定で遮断します。埋め込みプレーヤーは「前に広告を出した」といった記録すら残せないため、再生を開始するたびに新規視聴として扱われます。',
     steps: [
-      '設定アプリ → Safari →「サイト越えトラッキングを防ぐ」をオフ',
-      'それでも通らない場合は「配信サイトで開く」でTwitchアプリを使うのが確実です',
+      '設定アプリ → Safari →「サイト越えトラッキングを防ぐ」を<b>オフ</b>',
+      '変更後、下の「すべて再読み込み」を実行',
+      'ホーム画面のアプリとして使っている場合、<b>Safariとは別の保存領域</b>になります。Safariでログイン済みでもアプリ内では別扱いなので、アプリの中のチャットから改めてログインしてください',
+      'それでも変わらないときは、埋め込みでは打つ手がありません。枠の「配信サイトで開く」からTwitchアプリで見てください',
     ],
   },
   safari: {
@@ -1618,8 +1626,12 @@ const COOKIE_GUIDE = {
   },
   'ios-other': {
     title: 'iOSのブラウザ',
-    state: 'iOSのブラウザは中身がすべてSafariと同じ仕組みなので、サードパーティCookieの制限も同じです。',
-    steps: ['設定アプリ → Safari →「サイト越えトラッキングを防ぐ」をオフ', '通らない場合は「配信サイトで開く」でTwitchアプリを使ってください'],
+    state: 'iOSのブラウザは中身がすべてSafariと同じ仕組みなので、サードパーティCookieの制限もSafariと同じです。',
+    steps: [
+      '設定アプリ → Safari →「サイト越えトラッキングを防ぐ」を<b>オフ</b>（Chrome等を使っていてもここが効きます）',
+      '変更後、下の「すべて再読み込み」を実行',
+      '通らない場合は枠の「配信サイトで開く」からTwitchアプリで見てください',
+    ],
   },
   other: {
     title: 'お使いのブラウザ',
