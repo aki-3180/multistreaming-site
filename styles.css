@@ -726,8 +726,8 @@ body.compact.touch .tile.touch-through .tile-head {
 
 .tile.playing:not(.touch-through) .tap-shield { display: block; }
 
-.b-touch { display: none; }
-body.touch .b-touch { display: inline-flex; }
+/* 「直接操作」ボタンはPC・スマホとも出す。sandboxで配信サイトへ飛ばされなく
+   なったので、シールドを外してもプレーヤー内蔵UIを安全に触れる。 */
 
 /* 直接操作を許可中の枠は「触ると配信サイトへ飛ぶ状態」なので分かるようにする。
    内側(inset)だと映像のiframeに隠れてしまうため外側に出す。 */

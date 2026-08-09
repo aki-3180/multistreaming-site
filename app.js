@@ -151,11 +151,41 @@ function toast(msg, type = 'info', duration = 2600) {
   }, duration);
 }
 
+// 埋め込みプレーヤーから配信サイトへ飛ばされないようにする。
+// iframeのsandboxに allow-top-navigation は元から無いのでページ自体の遷移は
+// 起きないが、allow-popups が残っていると映像内のリンクが新しいタブで
+// 配信サイトを開いてしまう。そこだけ落とす。
+//
+// Twitchの埋め込みはSDKがiframeを作るので属性を直接は指定できない。ただし
+// buildIframe() はDOMへ挿す前の要素を返すため、ここで書き換えれば最初から効く。
+const DROP_SANDBOX = new Set(['allow-popups', 'allow-popups-to-escape-sandbox']);
+
+function hardenSandbox(frame) {
+  const tokens = (frame.getAttribute('sandbox') || '').split(/\s+/).filter(Boolean);
+  if (!tokens.length) return;
+  frame.setAttribute('sandbox', tokens.filter((t) => !DROP_SANDBOX.has(t)).join(' '));
+}
+
+let embedHardened = false;
+
+function hardenTwitchEmbed() {
+  if (embedHardened) return;
+  const proto = window.Twitch && window.Twitch.Player && window.Twitch.Player.prototype;
+  if (!proto || typeof proto.buildIframe !== 'function') return;
+  embedHardened = true;
+  const orig = proto.buildIframe;
+  proto.buildIframe = function (...args) {
+    const frame = orig.apply(this, args);
+    try { hardenSandbox(frame); } catch { /* ignore */ }
+    return frame;
+  };
+}
+
 function whenTwitchReady(cb, onFail) {
-  if (window.Twitch && window.Twitch.Player) { cb(); return; }
+  if (window.Twitch && window.Twitch.Player) { hardenTwitchEmbed(); cb(); return; }
   let waited = 0;
   const iv = setInterval(() => {
-    if (window.Twitch && window.Twitch.Player) { clearInterval(iv); cb(); }
+    if (window.Twitch && window.Twitch.Player) { clearInterval(iv); hardenTwitchEmbed(); cb(); }
     else if ((waited += 150) > 12000) { clearInterval(iv); if (onFail) onFail(); }
   }, 150);
 }
@@ -403,6 +433,10 @@ function createPlayer(key) {
   f.src = platform === 'yt' ? ytSrc(id, muted) : kickSrc(id, muted);
   f.setAttribute('allow', 'autoplay; fullscreen; encrypted-media; picture-in-picture');
   f.setAttribute('allowfullscreen', '');
+  // Twitchと同じ方針。allow-popups を与えないので「〜で見る」の類のリンクを
+  // 押しても新しいタブが開かない（allow-top-navigation も無いので遷移もしない）
+  f.setAttribute('sandbox',
+    'allow-scripts allow-same-origin allow-presentation allow-storage-access-by-user-activation');
   if (platform === 'kick') f.dataset.muted = String(muted);
   if (platform === 'yt') {
     f.addEventListener('load', () => {
@@ -540,13 +574,10 @@ function createTile(key) {
 // 遷移してしまう。透明なシールドで覆い、操作はこちらのUIだけに届くようにする。
 // （プレーヤー内蔵のミュートボタンが効かなくなるので、こちら側のミュートと
 //   二重になって状態が食い違う問題も同時に解消される）
-// 一時解除できるのはタッチ端末だけ（PCでは .b-touch を出さない）。
-// スマホはプレーヤー内蔵の画質・全画面に触る手段が他に無いので逃げ道を残すが、
-// PCはこちらのUIとキーボードで足りるうえ、解除すると映像のクリックで
-// 配信サイトへ飛んでしまうため用意しない。
 const touchThrough = new Set();
 const touchThroughTimers = new Map();
-// 指が触れただけで発動するので、開けっぱなしにせず一定時間で自動的に閉じる
+// タッチでは指が触れただけで発動してしまうので、開けっぱなしにせず自動で閉じる。
+// マウスは意図しないと押さないので、明示的に戻すまで開けたままにする。
 const TOUCH_THROUGH_MS = 30000;
 let touchThroughHinted = false;
 
@@ -557,10 +588,15 @@ function setTouchThrough(key, on) {
   touchThroughTimers.delete(key);
   if (on) {
     touchThrough.add(key);
-    touchThroughTimers.set(key, setTimeout(() => setTouchThrough(key, false), TOUCH_THROUGH_MS));
+    const auto = isCoarse();
+    if (auto) {
+      touchThroughTimers.set(key, setTimeout(() => setTouchThrough(key, false), TOUCH_THROUGH_MS));
+    }
     if (!touchThroughHinted) {
       touchThroughHinted = true;
-      toast('プレーヤーを直接操作できます（30秒で自動的に戻ります）', 'accent', 3600);
+      toast(auto
+        ? 'プレーヤーを直接操作できます（30秒で自動的に戻ります）'
+        : 'プレーヤーを直接操作できます。同じボタンで誤クリック防止に戻せます', 'accent', 4200);
     }
   } else {
     touchThrough.delete(key);
