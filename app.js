@@ -923,11 +923,15 @@ const MUTE_WRITE_GRACE_MS = 1500;
 const MUTE_SETTLE_MS = 2500;
 let muteSyncTimer = null;
 
+// 埋め込みプレーヤーは常に https://www.youtube.com（ytSrc参照）なので宛先originを固定する。
+// '*' だと、万一フレームに別オリジンが読み込まれた場合にそこへコマンドが届いてしまう。
+const YT_ORIGIN = 'https://www.youtube.com';
+
 function ytPost(frame, func, args = []) {
   if (!frame || !frame.contentWindow) return;
   try {
     frame.contentWindow.postMessage(
-      JSON.stringify({ event: 'command', func, args }), '*');
+      JSON.stringify({ event: 'command', func, args }), YT_ORIGIN);
   } catch { /* ignore */ }
 }
 
@@ -936,7 +940,7 @@ function ytListen(frame) {
   if (!frame || !frame.contentWindow) return;
   try {
     frame.contentWindow.postMessage(
-      JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), '*');
+      JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), YT_ORIGIN);
   } catch { /* ignore */ }
 }
 
@@ -1067,7 +1071,7 @@ function applyQuality(key) {
       : target >= 360 ? 'medium' : 'small';
     f.contentWindow.postMessage(JSON.stringify({
       event: 'command', func: 'setPlaybackQuality', args: [yq],
-    }), '*');
+    }), YT_ORIGIN);
   }
   // Kickのプレーヤーには画質APIが無いため対象外
 }

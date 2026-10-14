@@ -32,7 +32,9 @@ http.createServer((req, res) => {
   }
   if (pathname.endsWith('/')) pathname += 'index.html';
   const file = path.normalize(path.join(ROOT, pathname));
-  if (!file.startsWith(ROOT)) {
+  // 単純な startsWith(ROOT) は ROOT="/app/site" に対し "/app/site-secret" を
+  // 通してしまう（兄弟ディレクトリのプレフィックス一致）。区切り文字まで含めて判定する。
+  if (file !== ROOT && !file.startsWith(ROOT + path.sep)) {
     res.writeHead(403).end('Forbidden');
     return;
   }
